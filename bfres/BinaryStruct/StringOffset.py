@@ -2,6 +2,7 @@ import logging; log = logging.getLogger(__name__)
 from .Offset import Offset
 from .BinaryObject import BinaryObject
 from ..BinaryFile import BinaryFile
+from .text import decode_str
 import struct
 
 
@@ -16,7 +17,9 @@ class StringOffset(Offset):
         fmt:       Offset format. If None, this struct represents a
             string; otherwise, it represents the offset of a string.
         maxlen:    Maximum string length.
-        encoding:  String encoding.
+        encoding:  String encoding: a codec name, 'auto' (UTF-8 with
+            Shift-JIS fallback, never raises; see BinaryStruct/text.py) or None
+            to keep the raw bytes.
         lenprefix: Format of length field ahead of string.
             None for null-terminated string.
         """
@@ -49,6 +52,8 @@ class StringOffset(Offset):
             s = self._readNullTerminated(file)
 
         # decode the string
+        if self.encoding == 'auto':
+            return decode_str(s, offset)
         try:
             if self.encoding is not None: s = s.decode(self.encoding)
         except UnicodeDecodeError:

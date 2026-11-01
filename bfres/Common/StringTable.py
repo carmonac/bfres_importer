@@ -4,6 +4,7 @@ from ..BinaryStruct.Padding import Padding
 from ..BinaryStruct.StringOffset import StringOffset
 from ..BinaryStruct.Switch import Offset32, Offset64, String
 from ..BinaryFile import BinaryFile
+from ..BinaryStruct.text import decode_str
 
 
 class Header(BinaryStruct):
@@ -37,13 +38,7 @@ class StringTable:
             offset += (offset & 1) # pad to u16
             length = file.read('<H',   offset)
             data   = file.read(length, offset+2)
-            try:
-                data = data.decode('shift-jis')
-            except UnicodeDecodeError:
-                log.error("Can't decode string from 0x%X as 'shift-jis': %s",
-                    offset, data[0:16])
-                raise
-            self.strings[offset] = data
+            self.strings[offset] = decode_str(data, offset)
             #print('StrTab[%06X]: "%s"' % (offset, data))
             offset += length + 3 # +2 for length, 1 for null terminator
 

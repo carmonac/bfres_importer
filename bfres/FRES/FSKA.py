@@ -27,6 +27,16 @@ import struct
 
 import numpy as np
 
+try:
+    from ..BinaryStruct.text import decode_str
+except ImportError:  # loaded on its own by the unit tests
+    import importlib.util as _ilu, os as _os
+    _spec = _ilu.spec_from_file_location('_bfres_text', _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        'BinaryStruct', 'text.py'))
+    _text = _ilu.module_from_spec(_spec); _spec.loader.exec_module(_text)
+    decode_str = _text.decode_str
+
 FSKA_SIZE = 0x60
 BONE_ANIM_SIZE = 0x28
 CURVE_SIZE = 0x30
@@ -64,7 +74,7 @@ def _str(data, offset):
     if not offset:
         return None
     n, = struct.unpack_from('<H', data, offset)
-    return bytes(data[offset + 2:offset + 2 + n]).decode('utf-8', 'replace')
+    return decode_str(data[offset + 2:offset + 2 + n], offset)
 
 
 class AnimCurve:

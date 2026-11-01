@@ -6,6 +6,7 @@ from ..BinaryStruct.Switch import Offset32, Offset64, String
 from ..BinaryFile import BinaryFile
 from .RLT import RLT
 from ..Common import StringTable
+from ..BinaryStruct.text import decode_str
 from ..Exceptions import \
     UnsupportedFormatError, UnsupportedFileTypeError
 from .Dict import Dict
@@ -362,11 +363,16 @@ class FRES(DumpMixin):
         return self.file.tell()
 
 
-    def readStr(self, offset, fmt='<H', encoding='shift-jis'):
-        """Read string (prefixed with length) from given offset."""
+    def readStr(self, offset, fmt='<H', encoding='auto'):
+        """Read string (prefixed with length) from given offset.
+
+        encoding: 'auto' (UTF-8, then Shift-JIS, see BinaryStruct/text.py),
+            a codec name, or None to get the raw bytes.
+        """
         size = self.read(fmt, offset)
         data = self.read(size)
-        if encoding is not None: data = data.decode(encoding)
+        if encoding == 'auto': data = decode_str(data, offset)
+        elif encoding is not None: data = data.decode(encoding)
         return data
 
 
