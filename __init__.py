@@ -87,9 +87,18 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
         description="[Currently Broken] turn on if colours look wrong",
         default=False)
 
-    dump_textures: BoolProperty(name="Dump Textures",
-        description="Export textures to PNG.",
-        default=False)
+    texture_storage: EnumProperty(name="Textures",
+        description="Where the imported textures are kept",
+        items=(('PACK', "Pack in .blend", "Embed the images in the .blend file"),
+               ('FILES', "Save to folder",
+                "Save the images as PNG (EXR for HDR) in a folder and reference "
+                "the files instead of packing them")),
+        default='PACK')
+
+    texture_dir: StringProperty(name="Texture Folder",
+        description="Folder for the saved textures. Empty: <model>_textures "
+                    "next to the imported file",
+        subtype='DIR_PATH', default="")
 
     dump_debug: BoolProperty(name="Dump Debug Info",
         description="Create `fres-SomeFile-dump.txt` files for debugging.",
@@ -234,7 +243,9 @@ class BFRES_PT_import_textures(bpy.types.Panel):
         operator = sfile.active_operator
 
         layout.prop(operator, "import_tex_file")
-        layout.prop(operator, "dump_textures")
+        layout.prop(operator, "texture_storage")
+        if operator.texture_storage == 'FILES':
+            layout.prop(operator, "texture_dir")
         layout.prop(operator, "component_selector")
 
 class BFRES_PT_import_mesh(bpy.types.Panel):
