@@ -440,12 +440,33 @@ class UkingMaterialBuilder:
             values = {i: (param_floats(self.fmat, 'const_value%d' % i) or [0.0])[0]
                       for i in range(8)}
             pk = combiner.peak(expr, colors, values)
+            if pk > 1.0:  # HDR: refine with the textures' real maxima
+                pk = combiner.peak(expr, colors, values, self._texture_max(expr))
             if pk > 1.0:
                 strength = 1.0 / pk
                 self.mat['bfres_emission_peak'] = pk
         self.bsdf.inputs['Emission Strength'].default_value = strength
         self._emission_socket = color
         self._emission_strength = strength
+
+    def _texture_max(self, expr):
+        """slot -> per-channel maxima of the textures an expression reads
+        (the moon's texture only reaches ~0.3: normalizing as if it reached
+        1 would leave it dim)."""
+        import numpy as np
+        out = {}
+        for slot in combiner.textures_used(expr):
+            entry = self._slots[slot] if slot < len(self._slots) else None
+            if entry is None:
+                continue
+            image = entry[2]
+            try:
+                px = np.empty(len(image.pixels), dtype=np.float32)
+                image.pixels.foreach_get(px)
+                out[slot] = tuple(float(x) for x in px.reshape(-1, 4).max(axis=0))
+            except Exception:
+                pass
+        return out
 
     _emission_socket = None
     _emission_strength = 1.0
