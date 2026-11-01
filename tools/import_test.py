@@ -216,6 +216,10 @@ def render(path, size=768):
     cam.rotation_euler = (center - cam.location).to_track_quat("-Z", "Y").to_euler()
     scene.camera = cam
 
+    if scene.world is None:
+        scene.world = bpy.data.worlds.new("harness_world")
+    scene.world.color = (0.18, 0.18, 0.2)
+
     scene.render.engine = "BLENDER_WORKBENCH"
     shading = scene.display.shading
     shading.light = "STUDIO"
