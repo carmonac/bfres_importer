@@ -3,6 +3,7 @@ import bmesh
 import bpy
 from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 import struct
+from . import UkingMaterial
 
 class MaterialImporter:
     """Imports material from FMDL."""
@@ -17,8 +18,21 @@ class MaterialImporter:
         """Import specified material."""
         mat = bpy.data.materials.new(name=fmat.name)
         mat.use_nodes = True
-        mat_wrap = PrincipledBSDFWrapper(mat, is_readonly=False)
         self._addCustomProperties(fmat, mat)
+
+        if UkingMaterial.SHADER in (fmat.header.get('shader_name'),
+                                    fmat.header.get('shader_name2')):
+            textures = []
+            for sampler, info in fmat.textureSamplers.items():
+                image = bpy.data.images.get(info['textureName'])
+                if image is None:
+                    log.info("Texture %s missing", info['textureName'])
+                    continue
+                textures.append((sampler, info['textureName'], image))
+            UkingMaterial.UkingMaterialBuilder(fmat, mat, self.operator).build(textures)
+            return mat
+
+        mat_wrap = PrincipledBSDFWrapper(mat, is_readonly=False)
 
         if fmat.header['shader_name'] == 'Hoian_UBER':
             mat_wrap.base_color = fmat.materialParams['albedo_color']['data'][:3]
@@ -89,9 +103,6 @@ class MaterialImporter:
 
             textureHelper.image = image
             # add mapping here, the helper has locrotscale attributes
-            
-            # XXX Creates an error as theres no external file. Unsure if there's a better option to refresh the view after
-            image.reload()
         return mat
 
 
