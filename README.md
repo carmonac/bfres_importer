@@ -20,8 +20,10 @@ This addon is currently in heavy development and large portions of it do not wor
     - [x] Bones 
         - Bones import with proper parents, but are not connected tip to tail. 
         - A very rudamentary "Auto Connect" is included
-    - [ ] Animations
-        - Not planned, but may happen
+    - [x] Skeletal animations (FSKA, BFRES 5.x)
+        - Each animation becomes an action on the armature (sampled per frame, linear keys)
+        - A model's `<model>_Animation` file next to it is imported automatically
+        - Material/visibility animations (FMAA, FVIS) not yet
 
 # Resources
 - https://wiki.wexosmk.xyz/index.php/BFRES_(File_Format)/Switch
