@@ -57,6 +57,8 @@ class SkeletonImporter:
 
 
         bpy.ops.object.mode_set(mode='OBJECT')
+        from .AnimationImporter import store_rest
+        store_rest(armObj, fskl)
         return armObj
 
     def checknames(self, bone, armature):
