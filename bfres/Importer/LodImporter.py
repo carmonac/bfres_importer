@@ -141,10 +141,12 @@ class LodImporter:
         meshObj = bpy.data.objects.new(name=fshpMesh.name, object_data=fshpMesh)
         mdata   = meshObj.data
 
-        # make split normals
-        normals = self._vertexNormals(n0)[:len(mdata.vertices)].tolist()
-
-        mdata.normals_split_custom_set_from_vertices(normals)
+        # Custom split normals from `_n0`, so shading matches the game.
+        # Blender applies them to flat faces too, so leave them out when
+        # the user asked for flat shading.
+        if self.parent.operator.smooth_faces:
+            normals = self._vertexNormals(n0)[:len(mdata.vertices)].tolist()
+            mdata.normals_split_custom_set_from_vertices(normals)
 
         self.parent.lodCollection(self.lodIdx).objects.link(meshObj)
 
