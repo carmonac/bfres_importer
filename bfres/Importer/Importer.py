@@ -148,6 +148,7 @@ class Importer(ModelImporter):
         if getattr(self.operator, 'import_animations', True):
             self._importSkeletalAnims()
             self._importMaterialAnims()
+            self._importVisibilityAnims()
 
         return {'FINISHED'}
 
@@ -172,6 +173,26 @@ class Importer(ModelImporter):
         materials = self.targetMaterials or self.__dict__.get('createdMaterials') \
             or [m for m in bpy.data.materials if m.get('bfres_name')]
         self.materialActions = MaterialAnimationImporter(self.context).import_anims(sets, materials)
+
+    def _importVisibilityAnims(self):
+        from .VisibilityAnimationImporter import VisibilityAnimationImporter
+        try:
+            anims = self.fres.readVisibilityAnims()
+        except Exception:
+            log.exception("Could not read visibility animations")
+            return
+        if not anims:
+            return
+        materials = self.targetMaterials or self.__dict__.get('createdMaterials') \
+            or [m for m in bpy.data.materials if m.get('bfres_name')]
+        # objects of the model imported with this file (or the one its
+        # animations go on): the meshes deformed by its armature
+        arm = self.targetArmature or getattr(self, 'armature', None)
+        objects = [ob for ob in bpy.data.objects if ob.type == 'MESH'
+                   and (arm is None or any(m.type == 'ARMATURE' and m.object == arm
+                                           for m in ob.modifiers))]
+        self.visibilityActions = VisibilityAnimationImporter(self.context).import_anims(
+            anims, objects, materials)
 
     def _importSkeletalAnims(self):
         from .AnimationImporter import AnimationImporter, find_target_armature
