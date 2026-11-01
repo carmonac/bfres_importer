@@ -24,6 +24,81 @@ def pow2_round_up(x):
 
     return x + 1
     
+GOB_WIDTH  = 64    # bytes
+GOB_HEIGHT = 8     # rows (of elements)
+GOB_SIZE   = 512   # bytes
+
+
+def block_height_mip0(height):
+    """Block height (in GOBs: 1..16) the driver picks for a surface whose
+    first mip level is `height` elements (pixels, or BCn/ASTC blocks) tall.
+
+    BRTI stores its choice in textureLayout & 7 (log2); this is only used to
+    check it. Rule from Ryujinx, as in tegra_swizzle `block_height_mip0`.
+    """
+    height_and_half = height + height // 2
+    for bh, lim in ((16, 128), (8, 64), (4, 32), (2, 16)):
+        if height_and_half >= lim:
+            return bh
+    return 1
+
+
+def mip_block_height(mip_height, block_height_mip0):
+    """Block height (in GOBs) of a mip level `mip_height` elements tall.
+
+    The level-0 block height is halved while the level fits in half of a
+    block (tegra_swizzle `mip_block_height`, from the Ryujinx driver code).
+    Level 0 itself uses it too, which is a no-op when the BRTI block height
+    is the driver's own choice.
+    """
+    bh = block_height_mip0
+    while bh > 1 and mip_height <= (bh // 2) * GOB_HEIGHT:
+        bh //= 2
+    return bh
+
+
+def mip_size(width, height, bpp, tileMode, blockHeight):
+    """Bytes one swizzled level takes; width/height in elements."""
+    if tileMode == 1:
+        return round_up(width * bpp, 32) * height
+    return round_up(width * bpp, GOB_WIDTH) * round_up(height, blockHeight * GOB_HEIGHT)
+
+
+def align_layer_size(size, height, block_height_mip0):
+    """Array layers start at a multiple of a block of GOBs (Ryujinx
+    `AlignLayerSize`, gobBlocksInTileX = 1): the level-0 block height,
+    reduced like a mip level's for short surfaces; `height` in elements."""
+    bh = mip_block_height(height, block_height_mip0)
+    return round_up(size, bh * GOB_SIZE) if size else 0
+
+
+def surface_layout(width, height, blkWidth, blkHeight, bpp, tileMode,
+                   blockHeightLog2, mipCount=1, arrayCount=1):
+    """Where every mip level of a (2D / array / cube) surface lies.
+
+    Returns (levels, layerSize): `levels` has one dict per mip level
+    (`level`, `width`/`height` in pixels, `offset` from the start of the
+    layer, `size` in bytes, `blockHeightLog2` used to deswizzle it) and
+    `layerSize` is the stride between array layers (cube faces are layers).
+    """
+    bh0 = 1 << blockHeightLog2
+    levels = []
+    offset = 0
+    for level in range(max(1, mipCount)):
+        w = max(1, width >> level)
+        h = max(1, height >> level)
+        ew, eh = DIV_ROUND_UP(w, blkWidth), DIV_ROUND_UP(h, blkHeight)
+        bh = 1 if tileMode == 1 else mip_block_height(eh, bh0)
+        size = mip_size(ew, eh, bpp, tileMode, bh)
+        levels.append({'level': level, 'width': w, 'height': h, 'offset': offset,
+                       'size': size, 'blockHeightLog2': bh.bit_length() - 1})
+        offset += size
+    layerSize = offset
+    if arrayCount > 1 and tileMode != 1:
+        layerSize = align_layer_size(offset, DIV_ROUND_UP(height, blkHeight), bh0)
+    return levels, layerSize
+
+
 def deswizzle(width, height, blkWidth, blkHeight, bpp, tileMode, blockHeightLog2, data):
     """Return the image data in linear order (row by row of elements).
 
