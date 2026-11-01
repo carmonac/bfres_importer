@@ -497,6 +497,9 @@ class FMAT(FresObject):
             # 5.x has no index arrays: attributes follow dictionary order.
             assign['tex_attr_indx'] = 0
             assign['vtx_attr_indx'] = 0
+            # v10 exposes the shader names through the reflection data.
+            self.header['shader_name'] = assign['name']
+            self.header['shader_name2'] = assign['name2']
 
         self.vtxAttrs = []
         for i in range(assign['num_vtx_attrs']):
