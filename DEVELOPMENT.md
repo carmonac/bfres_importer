@@ -44,6 +44,10 @@ python3 tools/extract_corpus.py <romfs> /tmp/x --grep '^Model/Enemy_Lynel'
 `tools/corpus/botw_vis.txt` lists a few extra models with bone visibility
 animations (FVIS), which none of the main corpus has; extract them to their
 own folder (`~/Documents/bfres_corpus/botw_vis`) with `--list`.
+`tools/corpus/botw_str.txt` (folder `botw_str`) has models with Japanese
+strings in the string table; `tools/scan_strings.py <romfs>` finds them.
+Strings are decoded by `bfres/BinaryStruct/text.py` (UTF-8, then Shift-JIS,
+then UTF-8 with replacement characters and a warning).
 
 Keep the corpus outside the repository.
 

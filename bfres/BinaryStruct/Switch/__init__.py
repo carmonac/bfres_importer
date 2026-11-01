@@ -21,5 +21,5 @@ class String(StringOffset):
     # maxlen=1024 is arbitrary here. should never see a string that
     # long, so this just helps catch issues.
     def __init__(self, name, fmt='<I', maxlen=1024,
-    encoding='shift-jis', lenprefix='<H'):
+    encoding='auto', lenprefix='<H'):
         super().__init__(name, fmt, maxlen, encoding, lenprefix)
