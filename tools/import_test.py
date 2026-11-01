@@ -19,6 +19,8 @@ was decoded) and materials.
 
 --render DIR    writes DIR/<model>.png: a Workbench render with texture
                 colors, camera framing every mesh.
+--engine eevee  renders with EEVEE instead (sun + ambient light), to judge
+                materials rather than geometry.
 --baseline F    compares against a previous report and prints differences
                 (status, vertex/face/image counts, time).
 --opt k=v       forwards an option to the import operator, e.g.
@@ -189,13 +191,35 @@ def image_stats(img):
     }
 
 
+def _upstream_images(socket, seen=None):
+    """Image names feeding a node input, following links backwards."""
+    seen = seen if seen is not None else set()
+    names = []
+    for link in socket.links:
+        node = link.from_node
+        if node.name in seen:
+            continue
+        seen.add(node.name)
+        if node.type == "TEX_IMAGE":
+            names.append(node.image.name if node.image else None)
+        for inp in node.inputs:
+            names += _upstream_images(inp, seen)
+    return names
+
+
 def material_stats(mat):
     tex = []
+    inputs = {}
     if mat.node_tree:
         for n in mat.node_tree.nodes:
             if n.type == "TEX_IMAGE":
                 tex.append(n.image.name if n.image else None)
-    return {"name": mat.name, "textures": tex}
+            if n.type == "BSDF_PRINCIPLED":
+                for inp in n.inputs:
+                    if inp.is_linked:
+                        inputs[inp.name] = _upstream_images(inp)
+    return {"name": mat.name, "textures": tex, "inputs": inputs,
+            "backface_culling": mat.use_backface_culling}
 
 
 def scene_report():
@@ -230,7 +254,7 @@ def scene_report():
 
 # ---------------------------------------------------------------- render
 
-def render(path, size=768):
+def render(path, size=768, engine="workbench"):
     meshes = [o for o in bpy.data.objects if o.type == "MESH" and o.visible_get()]
     if not meshes:
         return False
@@ -258,10 +282,29 @@ def render(path, size=768):
         scene.world = bpy.data.worlds.new("harness_world")
     scene.world.color = (0.18, 0.18, 0.2)
 
-    scene.render.engine = "BLENDER_WORKBENCH"
-    shading = scene.display.shading
-    shading.light = "STUDIO"
-    shading.color_type = "TEXTURE"
+    if engine == "eevee":
+        # judge materials: real shading with a key light and soft fill
+        for name in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
+            try:
+                scene.render.engine = name
+                break
+            except TypeError:
+                continue
+        scene.world.use_nodes = True
+        bg = scene.world.node_tree.nodes.get("Background")
+        if bg:
+            bg.inputs["Color"].default_value = (0.35, 0.37, 0.42, 1)
+            bg.inputs["Strength"].default_value = 0.8
+        sun_data = bpy.data.lights.new("harness_sun", "SUN")
+        sun_data.energy = 3.0
+        sun = bpy.data.objects.new("harness_sun", sun_data)
+        sun.rotation_euler = (0.9, 0.2, 0.6)
+        scene.collection.objects.link(sun)
+    else:
+        scene.render.engine = "BLENDER_WORKBENCH"
+        shading = scene.display.shading
+        shading.light = "STUDIO"
+        shading.color_type = "TEXTURE"
     scene.render.resolution_x = size
     scene.render.resolution_y = size
     scene.render.film_transparent = False
@@ -273,7 +316,7 @@ def render(path, size=768):
 
 # ---------------------------------------------------------------- run
 
-def import_one(path, opts, render_dir):
+def import_one(path, opts, render_dir, engine="workbench"):
     reset_scene()
     cap = Capture()
     root = logging.getLogger()
@@ -300,7 +343,7 @@ def import_one(path, opts, render_dir):
         os.makedirs(render_dir, exist_ok=True)
         png = os.path.join(render_dir, os.path.splitext(entry["file"])[0] + ".png")
         try:
-            entry["render"] = png if render(png) else None
+            entry["render"] = png if render(png, engine=engine) else None
         except Exception:
             entry["render"] = None
             entry["log"].append("HARNESS render failed: " + traceback.format_exc()[-500:])
@@ -349,6 +392,8 @@ def parse_args(argv):
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--out")
     ap.add_argument("--render")
+    ap.add_argument("--engine", choices=("workbench", "eevee"), default="workbench",
+                    help="renderer for --render (eevee shows materials)")
     ap.add_argument("--baseline")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--opt", action="append", default=[])
@@ -376,7 +421,7 @@ def main():
     }
     print("BFRES harness: %d file(s), add-on from %s" % (len(files), loaded))
     for path in files:
-        e = import_one(path, opts, args.render)
+        e = import_one(path, opts, args.render, args.engine)
         report["results"].append(e)
         print(summary_line(e), flush=True)
     ok = sum(1 for e in report["results"] if e["status"] == "ok")
