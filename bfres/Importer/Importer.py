@@ -21,9 +21,6 @@ class Importer(ModelImporter):
         self.operator = operator
         self.context  = context
 
-        # Keep a link to the add-on preferences.
-        #self.addon_prefs = #context.user_preferences.addons[__package__].preferences
-
 
     @staticmethod
     def _add_object_to_group(ob, group_name):

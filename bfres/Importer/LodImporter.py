@@ -134,8 +134,7 @@ class LodImporter:
 
         mdata.normals_split_custom_set_from_vertices(normals)
 
-        bpy.context.scene.collection.objects.link(meshObj)
-        # self.parent._add_object_to_group(meshObj, self.fmdl.name)
+        self.parent.lodCollection(self.lodIdx).objects.link(meshObj)
 
         # Add material
         mat = self.fmdl.fmats[self.fshp.header['fmat_idx']]

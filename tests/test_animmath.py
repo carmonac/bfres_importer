@@ -105,6 +105,78 @@ class AnimMathTest(unittest.TestCase):
         c = self.m.make_continuous(q)
         self.assertTrue((np.sum(c[1:] * c[:-1], axis=1) > 0).all())
 
+    def _rand_rigid(self, rng, n, scale=None):
+        R = self.m.quat_to_matrix(rng.normal(size=(n, 4)))
+        t = rng.normal(size=(n, 3))
+        s = np.ones((n, 3)) if scale is None else scale
+        return self.m.compose(t, R, s)
+
+    def _chain(self, local):
+        """World matrices of a chain of bones from parent-relative ones."""
+        out, W = [], np.eye(4)
+        for L in local:
+            W = W @ L
+            out.append(W)
+        return out
+
+    def test_offset_identity_is_plain_basis(self):
+        rng = np.random.default_rng(5)
+        rest = self._rand_rigid(rng, 1)[0]
+        anim = self._rand_rigid(rng, 4)
+        np.testing.assert_allclose(self.m.pose_basis(rest, anim, np.eye(4)),
+                                   self.m.pose_basis(rest, anim), atol=1e-12)
+
+    def _check_offset_chain(self, anim_scale):
+        """A chain of bones whose Blender rest pose B = G @ O is reoriented
+        from the game rest G: posing with the compensated basis puts every
+        bone at A @ O (A = game animated matrix), so heads follow the game
+        and skinning matrices pose @ B^-1 equal A @ G^-1."""
+        rng = np.random.default_rng(6)
+        nb, nf = 5, 7
+        G = self._chain(self._rand_rigid(rng, nb))          # game rest, world
+        O = []
+        for _ in range(nb):                                # rotation only
+            o = self._rand_rigid(rng, 1)[0]
+            o[:3, 3] = 0
+            O.append(o)
+        B = [g @ o for g, o in zip(G, O)]                  # Blender rest
+        anim = [self._rand_rigid(rng, nf, anim_scale(rng, nf)) for _ in range(nb)]
+        for f in range(nf):
+            A = self._chain([a[f] for a in anim])          # game animated
+            P = np.eye(4)                                  # Blender pose world
+            for b in range(nb):
+                rest_game = G[b] if b == 0 else np.linalg.inv(G[b - 1]) @ G[b]
+                offset = np.linalg.inv(G[b]) @ B[b]
+                basis = self.m.pose_basis(rest_game, anim[b][f:f + 1], offset)[0]
+                # Blender: pose = parent_pose @ (B_parent^-1 @ B) @ basis
+                rest_blender = B[b] if b == 0 else np.linalg.inv(B[b - 1]) @ B[b]
+                P = P @ rest_blender @ basis
+                np.testing.assert_allclose(P, A[b] @ O[b], atol=1e-9)
+                np.testing.assert_allclose(P[:3, 3], A[b][:3, 3], atol=1e-9)
+                np.testing.assert_allclose(P @ np.linalg.inv(B[b]),
+                                           A[b] @ np.linalg.inv(G[b]), atol=1e-9)
+
+    def test_offset_compensation_rigid(self):
+        self._check_offset_chain(lambda rng, n: None)
+
+    def test_offset_compensation_uniform_scale(self):
+        self._check_offset_chain(
+            lambda rng, n: np.repeat(rng.uniform(0.5, 2, (n, 1)), 3, axis=1))
+
+    def test_offset_basis_decomposes(self):
+        # with rigid or uniformly scaled animation the compensated basis is
+        # still a plain loc/rot/scale (no shear), so keyframes reproduce it
+        rng = np.random.default_rng(7)
+        rest = self._rand_rigid(rng, 1)[0]
+        s = np.repeat(rng.uniform(0.5, 2, (6, 1)), 3, axis=1)
+        anim = self._rand_rigid(rng, 6, s)
+        o = self._rand_rigid(rng, 1)[0]
+        o[:3, 3] = 0
+        basis = self.m.pose_basis(rest, anim, o)
+        t, q, sc = self.m.decompose(basis)
+        np.testing.assert_allclose(self.m.compose(t, self.m.quat_to_matrix(q), sc),
+                                   basis, atol=1e-9)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -130,9 +130,26 @@ def bone_local(scale, rotate, translate, euler, is_root):
     return M
 
 
-def pose_basis(rest_local, anim_local):
-    """Blender pose-bone basis matrices: rest_local^-1 @ anim_local."""
-    return np.linalg.inv(rest_local) @ anim_local
+def pose_basis(rest_local, anim_local, offset=None):
+    """Blender pose-bone basis matrices.
+
+    rest_local: the bone's parent-relative game rest matrix (4, 4).
+    anim_local: parent-relative animated matrices (n, 4, 4).
+    offset: O = G^-1 @ B, from the bone's game rest matrix G to its Blender
+        rest matrix B (both in armature space), when Blender's bone was
+        reoriented; None means identity.
+
+    The Blender bone then ends up at A @ O in armature space, where A is
+    the game's animated bone matrix, so its head follows the game bone and
+    skinning (pose @ B^-1 = A @ G^-1) matches the game:
+        basis = O^-1 @ rest_local^-1 @ anim_local @ O
+    which is rest_local^-1 @ anim_local when O is the identity.
+    """
+    basis = np.linalg.inv(rest_local) @ anim_local
+    if offset is not None:
+        offset = np.asarray(offset, dtype=np.float64)
+        basis = np.linalg.inv(offset) @ basis @ offset
+    return basis
 
 
 def srt_to_mapping(sx, sy, rot, tx, ty):
