@@ -76,6 +76,30 @@ class AnimMathTest(unittest.TestCase):
                               np.zeros((1, 3)), False, False)[0]
         np.testing.assert_allclose(M[:3, :3] @ [1, 0, 0], [0, 1, 0], atol=1e-12)
 
+    def test_srt_to_mapping_matches_flipped_transform(self):
+        rng = np.random.default_rng(5)
+        for _ in range(20):
+            sx, sy = rng.uniform(0.2, 3, 2)
+            rot = rng.uniform(-3, 3)
+            tx, ty = rng.normal(size=2)
+            (lx, ly), r, (ssx, ssy) = self.m.srt_to_mapping(sx, sy, rot, tx, ty)
+            for u, v in rng.uniform(-1, 2, (5, 2)):
+                # game: uv' = T + R(rot) S uv, evaluated in game space
+                c, s_ = math.cos(rot), math.sin(rot)
+                vg = 1 - v
+                gu = tx + c * sx * u - s_ * sy * vg
+                gv = ty + s_ * sx * u + c * sy * vg
+                # blender mapping node: loc + R(r) (scale * uv)
+                cb, sb = math.cos(r), math.sin(r)
+                bu = lx + cb * ssx * u - sb * ssy * v
+                bv = ly + sb * ssx * u + cb * ssy * v
+                self.assertAlmostEqual(bu, gu, places=9)
+                self.assertAlmostEqual(bv, 1 - gv, places=9)
+
+    def test_srt_identity(self):
+        (lx, ly), r, (sx, sy) = self.m.srt_to_mapping(1, 1, 0, 0, 0)
+        self.assertEqual((float(lx), float(ly), float(r), float(sx), float(sy)), (0, 0, 0, 1, 1))
+
     def test_continuity(self):
         q = np.array([[1, 0, 0, 0], [-0.99, -0.1, 0, 0], [0.98, 0.2, 0, 0]], float)
         c = self.m.make_continuous(q)

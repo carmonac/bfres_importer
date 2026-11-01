@@ -9,6 +9,7 @@ class MaterialImporter:
     """Imports material from FMDL."""
 
     def __init__(self, parent, fmdl):
+        self.parent   = parent
         self.fmdl     = fmdl
         self.operator = parent.operator
         self.context  = parent.context
@@ -18,6 +19,10 @@ class MaterialImporter:
         """Import specified material."""
         mat = bpy.data.materials.new(name=fmat.name)
         mat.use_nodes = True
+        # original name: Blender may rename duplicates (Mt_Body.001), but
+        # material animations refer to materials by their game name
+        mat['bfres_name'] = fmat.name
+        self.parent.__dict__.setdefault('createdMaterials', []).append(mat)
         self._addCustomProperties(fmat, mat)
 
         if UkingMaterial.SHADER in (fmat.header.get('shader_name'),

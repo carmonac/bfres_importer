@@ -166,12 +166,19 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
             stem, ext = os.path.splitext(self.filepath)
             if stem.endswith('.Tex'):
                 stem = stem[:-4]
-            animpath = stem + '_Animation' + ext
-            if os.path.exists(animpath) and animpath != self.filepath:
+            # Enemy_Lynel -> Enemy_Lynel_Animation; Enemy_Guardian_A ->
+            # Enemy_Guardian_Animation (variants share their family's file)
+            candidates = [stem + '_Animation' + ext]
+            head, _, tail = os.path.basename(stem).rpartition('_')
+            if head:
+                candidates.append(os.path.join(os.path.dirname(stem), head + '_Animation' + ext))
+            animpath = next((c for c in candidates if os.path.exists(c)), None)
+            if animpath and animpath != self.filepath:
                 log.info("Importing animations from: %s", animpath)
                 animImporter = Importer(self, context)
                 animImporter.animationsOnly = True
                 animImporter.targetArmature = importer.armature
+                animImporter.targetMaterials = importer.__dict__.get('createdMaterials')
                 animImporter.run(animpath, **keywords)
 
         # the distant (low detail) model is kept in <model>_Far.sbfres

@@ -26,7 +26,11 @@ This addon is currently in heavy development and large portions of it do not wor
     - [x] Skeletal animations (FSKA, BFRES 5.x)
         - Each animation becomes an action on the armature (sampled per frame, linear keys)
         - A model's `<model>_Animation` file next to it is imported automatically
-        - Material/visibility animations (FMAA, FVIS) not yet
+    - [x] Material animations (FMAA, BFRES 5.x)
+        - Texture SRT (scrolling water...) keyframed on Mapping nodes
+        - Texture patterns (BotW color variants, dyes, wing blur) as a texture switch
+        - Other shader parameters as animated `param_<name>` material properties
+        - Visibility animations (FVIS, material visibility) not yet
 
 # Resources
 - https://wiki.wexosmk.xyz/index.php/BFRES_(File_Format)/Switch

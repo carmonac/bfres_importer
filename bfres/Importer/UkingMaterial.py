@@ -28,6 +28,8 @@ emulation of the color combiner):
 import logging; log = logging.getLogger(__name__)
 import bpy
 
+from . import animmath
+
 SHADER = 'uking_mat'
 
 # BotW has no roughness maps; this matte default (plus the specular mask
@@ -81,9 +83,21 @@ def render_info(fmat, name, default=None):
     return info['vals'][0]
 
 
-def uv_layers_for_samplers(fmat):
-    """Material sampler name -> UV layer name, from the shader slot that
-    uses it and that slot's uking_textureN_texcoord option."""
+def _int_option(fmat, name, default):
+    try:
+        return int(fmat.shaderOptions.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def coords_for_samplers(fmat):
+    """Material sampler name -> (UV layer name, tex_srt index or None).
+
+    shader slot N -> texcoord t = uking_textureN_texcoord;
+    texcoord t -> UV layer from uking_texcoord{t}_mapping (0 = _u0,
+    1 = _u1, ...; 10+ are projections we don't reproduce -> _u0, no SRT)
+    and texture transform tex_srt{uking_texcoord{t}_srt} (-1 = none).
+    """
     assign = fmat.shader_assign
     slots = [n.name for n in fmat.tex_attribute_dict.nodes][1:]
     values = [fmat.fres.readStr(fmat.fres.read('Q', assign['tex_attr_names'] + i * 8))
@@ -92,15 +106,37 @@ def uv_layers_for_samplers(fmat):
     for slot_idx, (slot, sampler) in enumerate(zip(slots, values)):
         if sampler in result:
             continue
-        tc = fmat.shaderOptions.get('uking_texture%d_texcoord' % slot_idx, '0')
-        try:
-            tc = int(tc)
-        except (TypeError, ValueError):
-            tc = 0
-        # 0-3 select a UV layer; higher values are projections/procedural
-        # coordinates we don't reproduce, so fall back to the first layer.
-        result[sampler] = '_u%d' % tc if 0 <= tc <= 3 else '_u0'
+        tc = _int_option(fmat, 'uking_texture%d_texcoord' % slot_idx, 0)
+        if not 0 <= tc <= 4:
+            result[sampler] = ('_u0', None)   # procedural / indirect coordinates
+            continue
+        mapping = _int_option(fmat, 'uking_texcoord%d_mapping' % tc, 0)
+        srt = _int_option(fmat, 'uking_texcoord%d_srt' % tc, -1)
+        if 0 <= mapping <= 3:
+            result[sampler] = ('_u%d' % mapping, srt if srt >= 0 else None)
+        else:
+            result[sampler] = ('_u0', None)
     return result
+
+
+def uv_layers_for_samplers(fmat):
+    """Material sampler name -> UV layer name (see coords_for_samplers)."""
+    return {k: v[0] for k, v in coords_for_samplers(fmat).items()}
+
+
+def tex_srt_values(fmat, index):
+    """(mode, scale x, scale y, rotation, translate x, translate y) of the
+    material's tex_srt<index> parameter, or None."""
+    import struct
+    p = fmat.materialParams.get('tex_srt%d' % index)
+    if not p:
+        return None
+    data = p['data']
+    if isinstance(data, (bytes, bytearray)) and len(data) >= 24:
+        return struct.unpack_from('<I5f', data)
+    if isinstance(data, (list, tuple)) and len(data) >= 6:
+        return tuple(data[:6])
+    return None
 
 
 class UkingMaterialBuilder:
@@ -113,6 +149,7 @@ class UkingMaterialBuilder:
         self.nodes = mat.node_tree.nodes
         self.links = mat.node_tree.links
         self._uv_nodes = {}
+        self._mapping_nodes = []
         self._loose_y = 0
 
     # ---------------------------------------------------------- helpers
@@ -131,16 +168,43 @@ class UkingMaterialBuilder:
             self._uv_nodes[layer] = n
         return self._uv_nodes[layer]
 
-    def _image(self, image, role, sampler, uv_layer, x, y, wired=True):
+    def _mapping(self, layer, srt):
+        """Mapping node applying tex_srt<srt> to UV layer `layer` (shared by
+        every texture on that coordinate). Named 'tex_srt<srt>:<layer>' so
+        material animations can find and keyframe it."""
+        name = 'tex_srt%d:%s' % (srt, layer)
+        n = self.nodes.get(name)
+        if n is None:
+            n = self._node('ShaderNodeMapping', -1050, 300 - 220 * len(self._mapping_nodes),
+                           'tex_srt%d' % srt)
+            n.name = name
+            n.vector_type = 'POINT'
+            self.links.new(self._uv(layer).outputs['UV'], n.inputs['Vector'])
+            vals = tex_srt_values(self.fmat, srt)
+            if vals:
+                n['bfres_srt'] = [float(v) for v in vals]  # base for animations
+                _mode, sx, sy, rot, tx, ty = vals
+                (lx, ly), r, (msx, msy) = animmath.srt_to_mapping(sx, sy, rot, tx, ty)
+                n.inputs['Location'].default_value = (float(lx), float(ly), 0.0)
+                n.inputs['Rotation'].default_value = (0.0, 0.0, float(r))
+                n.inputs['Scale'].default_value = (float(msx), float(msy), 1.0)
+            self._mapping_nodes.append(n)
+        return n
+
+    def _image(self, image, role, sampler, coord, x, y, wired=True):
+        layer, srt = coord
         n = self._node('ShaderNodeTexImage', x, y, '%s (%s)' % (role, sampler))
+        n.name = 'sampler:%s' % sampler  # found by texture pattern animations
         n.image = image
         # Images are shared between materials: only switch to Non-Color for
         # data maps that are actually wired, never for loose nodes, so an
         # albedo that also appears unconnected elsewhere keeps its colors.
         if wired and role in DATA_ROLES:
             image.colorspace_settings.name = 'Non-Color'
-        if uv_layer != '_u0':
-            self.links.new(self._uv(uv_layer).outputs['UV'], n.inputs['Vector'])
+        if srt is not None:
+            self.links.new(self._mapping(layer, srt).outputs['Vector'], n.inputs['Vector'])
+        elif layer != '_u0':
+            self.links.new(self._uv(layer).outputs['UV'], n.inputs['Vector'])
         return n
 
     # ---------------------------------------------------------- build
@@ -155,12 +219,12 @@ class UkingMaterialBuilder:
         bsdf.inputs['Roughness'].default_value = DEFAULT_ROUGHNESS
         self.bsdf = bsdf
 
-        uv_of = uv_layers_for_samplers(self.fmat)
+        coord_of = coords_for_samplers(self.fmat)
         by_role = {}
         loose = []
         for sampler, texname, image in textures:
             role = sampler_role(sampler, texname)
-            entry = (sampler, texname, image, uv_of.get(sampler, '_u0'))
+            entry = (sampler, texname, image, coord_of.get(sampler, ('_u0', None)))
             # Wire one texture per role. Albedo and normal can come in
             # layers (_a0/_a1, _n0/_n1) blended by the combiner; only the
             # base layer (index 0) is wired, the others stay loose.
@@ -222,7 +286,7 @@ class UkingMaterialBuilder:
         sampler, _, image, uv = entry
         tex = self._image(image, 'normal', sampler, uv, -700, -350)
         nm = self._node('ShaderNodeNormalMap', -300, -350)
-        nm.uv_map = uv
+        nm.uv_map = uv[0]
         self.links.new(tex.outputs['Color'], nm.inputs['Color'])
         self.links.new(nm.outputs['Normal'], self.bsdf.inputs['Normal'])
 
