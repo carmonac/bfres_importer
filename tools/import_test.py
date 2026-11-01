@@ -398,7 +398,7 @@ def compare(report, baseline_path):
             diffs.append("status %s -> %s" % (o["status"], e["status"]))
         for k in ("meshes", "verts", "faces", "bones", "images", "images_without_data",
                   "images_decode_failed", "uv_out_of_range", "uv_nan", "bad_normals", "actions"):
-            if o["totals"].get(k) != e["totals"].get(k):
+            if k in o["totals"] and o["totals"].get(k) != e["totals"].get(k):
                 diffs.append("%s %s -> %s" % (k, o["totals"].get(k), e["totals"].get(k)))
         if o["seconds"] and abs(e["seconds"] - o["seconds"]) / o["seconds"] > 0.25:
             diffs.append("time %.1fs -> %.1fs" % (o["seconds"], e["seconds"]))

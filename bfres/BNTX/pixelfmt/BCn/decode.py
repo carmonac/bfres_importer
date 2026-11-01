@@ -147,23 +147,29 @@ def fix_color_blocks(rgba, data, width, height, block_size, four_color_only):
 
     * BC1: index 3 is transparent black (the native decoder makes it opaque);
     * BC2/BC3: such blocks still use 4-color interpolation (the native
-      decoder uses BC1's 3-color mode).
+      decoder uses BC1's 3-color mode, so indices 2 and 3 differ).
 
-    `rgba` is a (height, width, 4) uint8 image; only those blocks are
-    decoded again here, with the Python decoder. Returns the fixed image.
+    `rgba` is a writable (height, width, 4) uint8 image. Only the affected
+    pixels are decoded again, with the Python decoder, and written back in
+    place. Returns the image.
     """
     blk = _blocks(data, width, height, block_size)
     col = blk[..., block_size - 8:]
-    sel = np.nonzero(_u16(col, 0) <= _u16(col, 2))
-    if not sel[0].size:
+    by, bx = np.nonzero(_u16(col, 0) <= _u16(col, 2))
+    if not by.size:
         return rgba
-    bh, bw = blk.shape[:2]
-    tex = _color_block(col[sel][None], four_color_only)[0]   # (k, 16, 4)
-    pad = np.zeros((bh * 4, bw * 4, 4), np.uint8)
-    pad[:height, :width] = rgba
-    view = pad.reshape(bh, 4, bw, 4, 4).transpose(0, 2, 1, 3, 4)  # (bh, bw, 4, 4, 4)
-    old = view[sel].reshape(-1, 16, 4)
-    if four_color_only:
-        tex[..., 3] = old[..., 3]        # keep the separately coded alpha
-    view[sel] = tex.reshape(-1, 4, 4, 4)
-    return pad[:height, :width]
+    sub = col[by, bx][None]                                   # (1, k, 8)
+    tex = _color_block(sub, four_color_only)[0]               # (k, 16, 4)
+    bits = (sub[0, :, 4].astype(np.uint32) | (sub[0, :, 5].astype(np.uint32) << 8)
+        | (sub[0, :, 6].astype(np.uint32) << 16) | (sub[0, :, 7].astype(np.uint32) << 24))
+    idx = (bits[:, None] >> (np.arange(16, dtype=np.uint32) * 2)) & 3   # (k, 16)
+    k, p = np.nonzero(idx >= 2 if four_color_only else idx == 3)
+    y = by[k] * 4 + p // 4
+    x = bx[k] * 4 + p % 4
+    keep = (y < height) & (x < width)
+    k, p, y, x = k[keep], p[keep], y[keep], x[keep]
+    if four_color_only:   # the alpha is coded separately: keep it
+        rgba[y, x, :3] = tex[k, p, :3]
+    else:
+        rgba[y, x] = tex[k, p]
+    return rgba
