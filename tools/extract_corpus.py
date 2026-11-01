@@ -22,6 +22,8 @@ Usage:
 The corpus list has one entry per line: a model base name (``Animal_Fox``)
 pulls ``Model/<name>.sbfres`` and, when present, ``Model/<name>.Tex.sbfres``.
 An entry ending in ``.sbfres`` (or any other extension) is copied as-is.
+An entry with ``.pack/`` in it is a file inside a SARC pack
+(``Pack/TitleBG.pack/Model/Terrain.Tex.sbfres``).
 Blank lines and ``#`` comments are ignored.
 
 Written to run on any Python >= 3.8 (macOS system python included); it has
@@ -138,6 +140,12 @@ def resolve(fs, items):
         return None
 
     for item in items:
+        if ".pack/" in item:
+            # a file inside a SARC pack: Pack/TitleBG.pack/Model/Terrain.Tex.sbfres
+            pack = item.split(".pack/", 1)[0] + ".pack"
+            hit = find(pack)
+            (wanted.append(hit + item[len(pack):]) if hit else missing.append(item))
+            continue
         if "." in os.path.basename(item):
             hit = find(item)
             (wanted.append(hit) if hit else missing.append(item))
@@ -151,6 +159,23 @@ def resolve(fs, items):
         if tex:
             wanted.append(tex)
     return wanted, missing
+
+
+def copy_from_pack(fs, path, dst, cache):
+    """Copy a file out of a SARC pack (``Pack/X.pack/inner/path``)."""
+    import tempfile
+    from uking_shader import sarc, yaz0
+    pack, inner = path.split(".pack/", 1)
+    pack += ".pack"
+    if pack not in cache:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpf = os.path.join(tmp, "pack")
+            fs.copy(pack, tmpf)
+            with open(tmpf, "rb") as f:
+                data = f.read()
+        cache[pack] = sarc(yaz0(data) if data[:4] == b"Yaz0" else data)
+    with open(dst, "wb") as out:
+        out.write(cache[pack][inner])
 
 
 def main(argv=None):
@@ -175,9 +200,13 @@ def main(argv=None):
     paths, missing = resolve(fs, read_list(args.list))
     os.makedirs(args.out, exist_ok=True)
     total = 0
+    packs = {}
     for p in paths:
         dst = os.path.join(args.out, os.path.basename(p))
-        fs.copy(p, dst)
+        if ".pack/" in p:
+            copy_from_pack(fs, p, dst, packs)
+        else:
+            fs.copy(p, dst)
         size = os.path.getsize(dst)
         total += size
         print("%-48s %10d" % (os.path.basename(p), size))

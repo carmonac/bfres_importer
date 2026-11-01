@@ -1,0 +1,7 @@
+# Breath of the Wild terrain texture arrays (MaterialAlb / MaterialCmb and
+# the grass/flower/tree arrays), used by field objects that blend with the
+# terrain (samplers tma/tmc). Not in the model's own .Tex: they live inside
+# Pack/TitleBG.pack. Extract next to (or in the parent folder of) the
+# corpus folders, or point the "Terrain Textures" import option at it:
+#   extract_corpus.py <romfs> ~/Documents/bfres_corpus/botw_terrain --list tools/corpus/botw_terrain.txt
+Pack/TitleBG.pack/Model/Terrain.Tex.sbfres
