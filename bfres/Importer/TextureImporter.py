@@ -43,7 +43,6 @@ def _setColorspace(image, dtype, hdr):
 TEXTURE_PROP = 'bfres_texture'   # game texture name (the image may be renamed)
 HASH_PROP = 'bfres_hash'         # identity of the texture data, for reuse
 FAMILIES_PROP = 'bfres_families'  # models whose files contain it, one per line
-ALIASES_PROP = 'bfres_aliases'   # other texture names with the same data
 
 
 def family(path):
@@ -74,18 +73,12 @@ def _add_family(image, fam):
         image[FAMILIES_PROP] = '\n'.join(fams + [fam])
 
 
-def _names(image):
-    names = [image.get(TEXTURE_PROP)]
-    names += [n for n in (image.get(ALIASES_PROP) or '').split('\n') if n]
-    return names
-
-
 def find_image(name, fam=None):
     """The image of game texture `name`, preferring one imported from the
     files of model `fam` (texture names repeat across models: CmnTex_*,
     or the same model imported twice after an edit). Images imported by
     older versions, without the properties, are found by name."""
-    candidates = [im for im in bpy.data.images if name in _names(im)]
+    candidates = [im for im in bpy.data.images if im.get(TEXTURE_PROP) == name]
     if fam:
         for im in candidates:
             if fam in _families(im):
@@ -105,7 +98,9 @@ class TextureImporter:
     Images keep the game texture name when it is free; a different texture
     with a name already taken gets the model as prefix
     ("Enemy_Lynel:CmnTex_Noise"), and a texture identical to an image
-    already in the file (same format, size and data) reuses that image.
+    already in the file (same name, format, size and data) reuses that
+    image. Textures with different names are never merged, even when
+    their data is the same, so every texture keeps an image of its name.
     find_image() resolves a texture name for a model.
 
     With texture_storage == 'FILES', images are saved as PNG (EXR for HDR)
@@ -135,13 +130,11 @@ class TextureImporter:
                 # (has_data is not checked: a packed image whose colorspace
                 # the material changed frees its buffer until it is used)
                 existing = next((im for im in bpy.data.images
-                                 if im.get(HASH_PROP) == key), None)
+                                 if im.get(HASH_PROP) == key
+                                 and im.get(TEXTURE_PROP) == tex.name), None)
                 if existing is not None:
                     log.info("Reusing image %s for texture %s", existing.name, tex.name)
                     _add_family(existing, fam)
-                    if tex.name not in _names(existing):
-                        aliases = _names(existing)[1:] + [tex.name]
-                        existing[ALIASES_PROP] = '\n'.join(aliases)
                     images[tex.name] = existing
                     continue
             name = tex.name
