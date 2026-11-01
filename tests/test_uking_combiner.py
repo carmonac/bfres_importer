@@ -156,6 +156,20 @@ class CombinerTest(unittest.TestCase):
         c = self.comb(horse_opts())
         self.assertIs(c.stage(0), c.stage(0))
 
+    def test_peak_moon(self):
+        # Mt_Etc_Moon_A: emission = mix(const_color1, const_color0, Alb.R)
+        o = {}
+        stage(o, 1, 4, [(101, 0), (100, 0), (0, 10), (0, 0)])
+        c = C.Combiner(o, 1, False, range(8), range(8))
+        e = c.parse(201)
+        colors = {i: (1.0, 1.0, 1.0, 1.0) for i in range(8)}
+        colors[0] = (90.0, 180.0, 170.0, 1.0)
+        colors[1] = (0.0, 0.0, 0.0, 0.0)
+        values = {i: 1.0 for i in range(8)}
+        self.assertAlmostEqual(C.peak(e, colors, values), 180.0)
+        colors[0] = (0.5, 0.25, 0.1, 1.0)
+        self.assertAlmostEqual(C.peak(e, colors, values), 0.5)
+
 
 if __name__ == '__main__':
     unittest.main()

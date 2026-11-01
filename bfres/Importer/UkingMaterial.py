@@ -335,8 +335,7 @@ class UkingMaterialBuilder:
         else:
             emission = parse('uking_emission_color') if on('uking_enable_emission') else None
             if emission is not None:
-                self.links.new(self.nc.color(emission), self.bsdf.inputs['Emission Color'])
-                self.bsdf.inputs['Emission Strength'].default_value = 1.0
+                self._combined_emission(emission)
             else:
                 self._emission(by_role.get('emission'), by_role.get('emission_mask'))
 
@@ -422,6 +421,34 @@ class UkingMaterialBuilder:
         nm.uv_map = layers[0] if layers else '_u0'
         self.links.new(mix.outputs['Result'], nm.inputs['Color'])
         self.links.new(nm.outputs['Normal'], self.bsdf.inputs['Normal'])
+
+    def _combined_emission(self, expr):
+        """Emission from the combiner. Breath of the Wild renders in HDR
+        and tonemaps with the scene's exposure: the moon's emission peaks
+        at 180 (const_color0 = 90, 180, 170) and glows at tens, which in
+        Blender saturate to flat white. Unless the operator asks for raw
+        values, HDR emission (peak above 1) is scaled so its peak is 1,
+        keeping the hue and the texture detail. The peak is kept in the
+        material's 'bfres_emission_peak': an Emission Strength of 1 gives
+        the game's raw values back."""
+        color = self.nc.color(expr)
+        self.links.new(color, self.bsdf.inputs['Emission Color'])
+        strength = 1.0
+        if getattr(self.operator, 'hdr_emission', 'NORMALIZE') == 'NORMALIZE':
+            colors = {i: tuple((param_floats(self.fmat, 'const_color%d' % i) or []) + [1.0] * 4)[:4]
+                      for i in range(8)}
+            values = {i: (param_floats(self.fmat, 'const_value%d' % i) or [0.0])[0]
+                      for i in range(8)}
+            pk = combiner.peak(expr, colors, values)
+            if pk > 1.0:
+                strength = 1.0 / pk
+                self.mat['bfres_emission_peak'] = pk
+        self.bsdf.inputs['Emission Strength'].default_value = strength
+        self._emission_socket = color
+        self._emission_strength = strength
+
+    _emission_socket = None
+    _emission_strength = 1.0
 
     def _combined_specular(self, expr):
         scale = self._node('ShaderNodeMath', -250, -60, 'specular mask')
@@ -513,6 +540,24 @@ class UkingMaterialBuilder:
 
     _alpha_source = None
 
+    def _additive(self, color, alpha):
+        """Additive blending (src_alpha, one: glows like the moon's halo):
+        the surface only adds color x alpha to what is behind it, which in
+        Blender is a Transparent BSDF plus an Emission shader."""
+        out = next(n for n in self.nodes if n.bl_idname == 'ShaderNodeOutputMaterial')
+        em = self._node('ShaderNodeEmission', 150, 550, 'additive')
+        em.inputs['Strength'].default_value = self._emission_strength
+        mul = self._node('ShaderNodeVectorMath', 0, 650, 'color x alpha')
+        mul.operation = 'SCALE'
+        self.links.new(color, mul.inputs[0])
+        self.links.new(alpha, mul.inputs['Scale'])
+        self.links.new(mul.outputs['Vector'], em.inputs['Color'])
+        tr = self._node('ShaderNodeBsdfTransparent', 150, 700)
+        add = self._node('ShaderNodeAddShader', 300, 600, 'additive blend')
+        self.links.new(tr.outputs['BSDF'], add.inputs[0])
+        self.links.new(em.outputs['Emission'], add.inputs[1])
+        self.links.new(add.outputs['Shader'], out.inputs['Surface'])
+
     def _render_state(self):
         fmat, mat = self.fmat, self.mat
         mode = render_info(fmat, 'gsys_render_state_mode', 'opaque')
@@ -532,7 +577,12 @@ class UkingMaterialBuilder:
             self.links.new(self._alpha_source, cmp.inputs[0])
             self.links.new(cmp.outputs['Value'], self.bsdf.inputs['Alpha'])
         elif self._alpha_source is not None and (mode == 'translucent' or blend == 'color'):
-            self.links.new(self._alpha_source, self.bsdf.inputs['Alpha'])
+            additive = (render_info(fmat, 'gsys_color_blend_rgb_dst_func', '') == 'one'
+                        and render_info(fmat, 'gsys_color_blend_rgb_src_func', '') == 'src_alpha')
+            if additive and self._emission_socket is not None:
+                self._additive(self._emission_socket, self._alpha_source)
+            else:
+                self.links.new(self._alpha_source, self.bsdf.inputs['Alpha'])
             if hasattr(mat, 'surface_render_method'):
                 mat.surface_render_method = 'BLENDED'
 

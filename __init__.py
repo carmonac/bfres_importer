@@ -104,6 +104,14 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
         description="Create `fres-SomeFile-dump.txt` files for debugging.",
         default=False)
     
+    hdr_emission: EnumProperty(name="HDR Emission",
+        description="Breath of the Wild emission above 1 (the moon, glows) is "
+                    "meant for the game's HDR tonemapping",
+        items=(('NORMALIZE', "Normalize", "Scale HDR emission so its peak is 1 "
+                "(keeps hue and detail; the peak is stored in bfres_emission_peak)"),
+               ('RAW', "Raw", "Use the game's values (saturate to white in Blender)")),
+        default='NORMALIZE')
+
     enable_sss: BoolProperty(name="Use Subsurface",
         description="Apply Subsurface Scattering textures",
         default=False)
@@ -294,6 +302,7 @@ class BFRES_PT_import_mat(bpy.types.Panel):
         operator = sfile.active_operator
 
         layout.prop(operator, "enable_sss")
+        layout.prop(operator, "hdr_emission")
         layout.prop(operator, "team colour")
 
 class BFRES_PT_import_misc(bpy.types.Panel):
