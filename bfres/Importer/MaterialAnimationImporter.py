@@ -11,10 +11,13 @@ One action per FMAA. It animates, for each affected material:
   a custom property 'param_<name>' on the material, initialised with the
   material's static value. uking_mat's color combiner is not emulated
   (#25), so these are exposed for users to wire up rather than connected.
+- material visibility ("*_fvm") -> hide_viewport / hide_render of every
+  mesh object that uses the material (constant keys).
 
 Parameter curves are sampled at every frame (linear keys), as for
-skeletal animations. Node animation lives on the material's node tree
-and properties on the material; the action gets one slot for each.
+skeletal animations. Node animation lives on the material's node tree,
+properties on the material and visibility on the objects; the action gets
+one slot for each.
 """
 import logging; log = logging.getLogger(__name__)
 import struct
@@ -62,6 +65,12 @@ def _base_param(mat, name):
             return [float(data)]
         except (TypeError, ValueError):
             return []
+
+
+def objects_using(mat):
+    """Mesh objects with `mat` in one of their material slots."""
+    return [ob for ob in bpy.data.objects if ob.type == 'MESH'
+            and any(sl.material == mat for sl in ob.material_slots)]
 
 
 class MaterialAnimationImporter:
@@ -178,8 +187,12 @@ class MaterialAnimationImporter:
         wrote = False
         for ma in s.materials:
             for mat in materials_named(ma.name, materials):
-                for idb, id_type, writer in ((mat, 'MATERIAL', self._write_params),
-                                             (mat.node_tree, 'NODETREE', self._write_nodes)):
+                targets = [(mat, 'MATERIAL', self._write_params),
+                           (mat.node_tree, 'NODETREE', self._write_nodes)]
+                if ma.visibility is not None:
+                    targets += [(ob, 'OBJECT', self._write_visibility)
+                                for ob in objects_using(mat)]
+                for idb, id_type, writer in targets:
                     if idb.animation_data is None:
                         idb.animation_data_create()
                     previous = idb.animation_data.action
@@ -188,7 +201,7 @@ class MaterialAnimationImporter:
                     # Every embedded node tree is called "Shader Nodetree",
                     # so the default slot (named after the ID) would be
                     # shared by all materials: give each its own slot.
-                    slot = act.slots.new(id_type, mat.name)
+                    slot = act.slots.new(id_type, idb.name if id_type == 'OBJECT' else mat.name)
                     idb.animation_data.action_slot = slot
                     n = writer(act, idb, mat, ma, s, frames, switches)
                     wrote = wrote or n > 0
@@ -207,6 +220,14 @@ class MaterialAnimationImporter:
             bpy.data.actions.remove(act)
             return None
         return act
+
+    def _write_visibility(self, act, ob, mat, ma, s, frames, switches):
+        hidden = (~ma.sample_visibility(frames)).astype(np.float64)
+        for path in ('hide_viewport', 'hide_render'):
+            fc = act.fcurve_ensure_for_datablock(ob, path, index=0,
+                                                 group_name='visibility:' + ma.name)
+            _keys(fc, frames, hidden, CONSTANT)
+        return 2
 
     def _write_params(self, act, mat, _mat, ma, s, frames, switches):
         n = 0

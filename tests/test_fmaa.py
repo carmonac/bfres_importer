@@ -84,6 +84,41 @@ class FMAATest(unittest.TestCase):
         self.assertEqual(pt.name, '_a0')
         self.assertEqual(pt.sample(np.array([0.0, 1.0, 2.0])).tolist(), [0, 1, 0])
 
+    def build_fvm(self, frames, word_list):
+        """A visibility animation like Horse_Link_Foot_fvm: one material, one
+        boolean step curve (byte frames, keys packed one bit per key)."""
+        F, M = self.F, self.M
+        b = Builder()
+        flags = (F.CURVE_STEP_BOOL << 4) | F.FRAME_BYTE
+        c = curve_bytes(b, frames, [[w] for w in word_list], flags, 0,
+                        frame_fmt='<B', key_fmt='<I', int_offset=0)
+        curves = b.put(c)
+        mat = b.put(struct.pack('<5Q9H6x', b.string('Mt_Foot'), 0, 0, curves, 0,
+                                0xFFFF, 0xFFFF, 0, 0, 0xFFFF, 0, 0, 0, 1))
+        hdr = b'FMAA' + b'\0' * 12 + struct.pack(
+            '<10Q4HiI4H', b.string('Foot_fvm'), 0, 0, 0, mat, 0, 0, 0, 0, 0,
+            0, 0, 1, 1, frames[-1], 0, 0, 0, 0, 0)
+        off = b.put(hdr)
+        return M.MaterialAnimSet(bytes(b.buf), off)
+
+    def test_visibility(self):
+        s = self.build_fvm([0, 1, 2], [0b101])
+        ma = s.materials[0]
+        self.assertIsNotNone(ma.visibility)
+        self.assertEqual(ma.params, [])
+        self.assertEqual(ma.sample_visibility(s.frames()).tolist(), [True, False, True])
+
+    def test_visibility_many_keys(self):
+        # 40 keys span two 32-bit words: key 33 is bit 1 of the second word
+        frames = list(range(40))
+        s = self.build_fvm(frames, [0xFFFFFFFF, 0b10])
+        vis = s.materials[0].sample_visibility(np.arange(40.0))
+        self.assertEqual(vis.tolist(), [True] * 32 + [False, True] + [False] * 6)
+
+    def test_no_visibility(self):
+        self.assertIsNone(self.build().materials[0].visibility)
+        self.assertIsNone(self.build().materials[0].sample_visibility(np.arange(3.0)))
+
     def test_bad_magic(self):
         with self.assertRaises(self.M.FMAAError):
             self.M.MaterialAnimSet(b'\0' * 0x100, 0)
