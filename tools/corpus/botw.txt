@@ -1,0 +1,35 @@
+# Breath of the Wild (Switch, BFRES 5.3) test corpus.
+# A base name pulls Model/<name>.sbfres and Model/<name>.Tex.sbfres.
+# Full file names are copied as-is (animations, extra parts).
+
+# Reference model: known to import correctly upstream.
+Animal_Fox
+Animal_Fox_Animation.sbfres
+
+# Known-broken upstream: UV map is wrong.
+Animal_Bee
+
+# Known-broken upstream: "weird", undiagnosed.
+Npc_Zelda_Miko
+
+# Skinned enemy with several textures and a shared animation file.
+Enemy_Guardian_A
+Enemy_Guardian_Animation.sbfres
+
+# Large skinned enemy.
+Enemy_Lynel
+Enemy_Lynel_Animation.sbfres
+
+# Link armor (player body parts).
+Armor_001
+
+# Horse: skinned body plus a separate mane model.
+Horse_Link
+Horse_Link_Mane
+
+# Map object with a large texture set and a distant (_Far) version.
+FldObj_PlayerChapel_A
+FldObj_PlayerChapel_A_Far
+
+# Stress test: big dungeon model.
+DgnObj_IbutsuWater_A
