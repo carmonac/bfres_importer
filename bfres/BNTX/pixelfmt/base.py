@@ -17,6 +17,7 @@ import struct
 import numpy as np
 
 types = { # name => id, bytes per pixel
+    'R8':        {'id':0x02, 'bpp': 1},
     'R5G6B5':    {'id':0x07, 'bpp': 2},
     'R8G8':      {'id':0x09, 'bpp': 2},
     'R16':       {'id':0x0A, 'bpp': 2},
@@ -28,8 +29,8 @@ types = { # name => id, bytes per pixel
     'BC3':       {'id':0x1C, 'bpp':16},
     'BC4':       {'id':0x1D, 'bpp': 8},
     'BC5':       {'id':0x1E, 'bpp':16},
-    'BC6':       {'id':0x1F, 'bpp': 8}, # XXX verify bpp
-    'BC7':       {'id':0x20, 'bpp': 8}, # XXX verify bpp
+    'BC6':       {'id':0x1F, 'bpp':16}, # bytes per 4x4 block
+    'BC7':       {'id':0x20, 'bpp':16},
     'ASTC4x4':   {'id':0x2D, 'bpp':16},
     'ASTC5x4':   {'id':0x2E, 'bpp':16},
     'ASTC5x5':   {'id':0x2F, 'bpp':16},

@@ -139,3 +139,40 @@ def bc5(data, width, height, signed=False):
     rg = np.stack((_channel(blk[..., :8], signed), _channel(blk[..., 8:], signed)), -1)
     img = _assemble(rg, width, height)
     return np.ascontiguousarray(img.reshape(-1, 2).T)
+
+
+def fix_color_blocks(rgba, data, width, height, block_size, four_color_only):
+    """Patch a natively decoded BC1/BC2/BC3 image where the native decoder
+    differs from the specification, i.e. blocks with color0 <= color1:
+
+    * BC1: index 3 is transparent black (the native decoder makes it opaque);
+    * BC2/BC3: such blocks still use 4-color interpolation (the native
+      decoder uses BC1's 3-color mode, so indices 2 and 3 differ).
+
+    `rgba` is a writable (height, width, 4) uint8 image. Only the affected
+    pixels are decoded again, with the Python decoder, and written back in
+    place. Returns the image.
+    """
+    blk = _blocks(data, width, height, block_size)
+    col = blk[..., block_size - 8:]
+    by, bx = np.nonzero(_u16(col, 0) <= _u16(col, 2))
+    if not by.size:
+        return rgba
+    sub = col[by, bx]                                         # (k, 8)
+    bits = (sub[:, 4].astype(np.uint32) | (sub[:, 5].astype(np.uint32) << 8)
+        | (sub[:, 6].astype(np.uint32) << 16) | (sub[:, 7].astype(np.uint32) << 24))
+    idx = (bits[:, None] >> (np.arange(16, dtype=np.uint32) * 2)) & 3   # (k, 16)
+    hit = idx >= 2 if four_color_only else idx == 3
+    k, p = np.nonzero(hit)
+    y = by[k] * 4 + p // 4
+    x = bx[k] * 4 + p % 4
+    keep = (y < height) & (x < width)
+    k, p, y, x = k[keep], p[keep], y[keep], x[keep]
+    if not four_color_only:
+        rgba[y, x] = 0          # BC1 3-color mode: index 3 is transparent black
+        return rgba
+    # BC2/BC3: decode the 4-color palette of the affected blocks only
+    blocks, k = np.unique(k, return_inverse=True)
+    tex = _color_block(sub[blocks][None], True)[0]            # (n, 16, 4)
+    rgba[y, x, :3] = tex[k, p, :3]  # alpha is coded separately: keep it
+    return rgba

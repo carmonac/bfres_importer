@@ -83,6 +83,50 @@ Other options:
 The exit code is non-zero when any model fails, so the harness can gate a
 commit.
 
+## Texture decoders
+
+Block-compressed textures are decoded by the native module
+[texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT) when
+it can be loaded, and by the numpy decoders in `bfres/BNTX/pixelfmt/BCn/`
+otherwise (BC1-BC7; ASTC needs the native module). Both give the same
+pixels; BC6H always uses numpy, because the native decoder clamps it to
+8 bits. `bfres/BNTX/pixelfmt/native.py` looks for the module:
+
+1. `import texture2ddecoder`: when the add-on is installed as an extension,
+   Blender installs the matching wheel listed in `blender_manifest.toml`;
+2. otherwise (add-on loaded from a checkout, as the harness does) the
+   matching wheel in `wheels/` is unzipped once into a cache folder
+   (`~/Library/Caches/bfres_importer`, `%LOCALAPPDATA%\bfres_importer`,
+   `~/.cache/bfres_importer`; `BFRES_CACHE_DIR` overrides) and imported
+   from there.
+
+The wheels are `abi3` builds for Python 3.11+ (macOS arm64 and x86_64,
+Windows x64, Linux x64). To update them:
+
+```bash
+for p in macosx_11_0_arm64 macosx_10_9_x86_64 win_amd64 manylinux2014_x86_64; do
+  pip download texture2ddecoder --no-deps --only-binary=:all: \
+      --platform $p --python-version 3.13 -d wheels
+done
+```
+
+and update the `wheels` list in `blender_manifest.toml`. Set
+`BFRES_NATIVE_DECODER=0` to force the Python decoders (testing, timing).
+Images the importer creates carry `bfres_format`, `bfres_component`
+(UNorm/SRGB/SNorm...), `bfres_decoder` (native/python) and, if decoding
+failed, `bfres_decode_error`; the harness counts the latter.
+
+BotW has no BC6H, BC7 or ASTC textures. `tools/test_textures.py` makes a
+synthetic BNTX with every format from generated images and checks the
+import against reference decoders (bcdec, astcenc). Its `make` step needs
+`pip install numpy imagecodecs etcpak astc-encoder-py` in some Python
+(not Blender's own):
+
+```bash
+python3 tools/test_textures.py make /tmp/synth/synth
+$BLENDER -b --factory-startup --python tools/test_textures.py -- check /tmp/synth/synth.bntx
+```
+
 ## Proving a refactor changes nothing
 
 `tools/snapshot.py` fingerprints every mesh (positions, faces, smooth flags,

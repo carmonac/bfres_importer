@@ -188,6 +188,10 @@ def image_stats(img):
         "size": [w, h],
         "has_data": bool(img.has_data and w and h),
         "colorspace": img.colorspace_settings.name,
+        "float": bool(img.is_float),
+        "format": img.get("bfres_format"),
+        "decoder": img.get("bfres_decoder"),
+        "decode_error": img.get("bfres_decode_error"),
     }
 
 
@@ -251,6 +255,7 @@ def scene_report():
             "bones": sum(a["bones"] for a in arms),
             "images": len(imgs),
             "images_without_data": sum(1 for i in imgs if not i["has_data"]),
+            "images_decode_failed": sum(1 for i in imgs if i["decode_error"]),
             "materials": len(mats),
             "uv_out_of_range": sum(m["uv_out_of_range"] for m in meshes),
             "uv_nan": sum(m["uv_nan"] for m in meshes),
@@ -374,7 +379,7 @@ def summary_line(e):
         err = (lines[-1] if lines else "")[:70]
     return "%-36s %-6s %6.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %4d  nrmbad %3d  anim %3d  log %3d  %s" % (
         e["file"][:36], e["status"], e["seconds"], t["meshes"], t["verts"],
-        t["images"] - t["images_without_data"], t["images"],
+        t["images"] - t["images_without_data"] - t.get("images_decode_failed", 0), t["images"],
         t["uv_out_of_range"] + t["uv_nan"], t.get("bad_normals", 0), t.get("actions", 0),
         e["log_count"], err)
 
@@ -392,8 +397,8 @@ def compare(report, baseline_path):
         if o["status"] != e["status"]:
             diffs.append("status %s -> %s" % (o["status"], e["status"]))
         for k in ("meshes", "verts", "faces", "bones", "images", "images_without_data",
-                  "uv_out_of_range", "uv_nan", "bad_normals", "actions"):
-            if o["totals"].get(k) != e["totals"].get(k):
+                  "images_decode_failed", "uv_out_of_range", "uv_nan", "bad_normals", "actions"):
+            if k in o["totals"] and o["totals"].get(k) != e["totals"].get(k):
                 diffs.append("%s %s -> %s" % (k, o["totals"].get(k), e["totals"].get(k)))
         if o["seconds"] and abs(e["seconds"] - o["seconds"]) / o["seconds"] > 0.25:
             diffs.append("time %.1fs -> %.1fs" % (o["seconds"], e["seconds"]))

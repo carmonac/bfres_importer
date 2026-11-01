@@ -15,7 +15,8 @@ This addon is currently in heavy development and large portions of it do not wor
         - Vertex colors `_c0`, `_c1`... as color attributes (float, per vertex, values as stored)
         - Tangents / bitangents as `_t0` / `_b0` vector attributes, their sign in `_t0_w` / `_b0_w`
     - [x] Textures
-        - Very slow, needs work on 
+        - BC1-BC7 (BC6H as a float/HDR image), all ASTC block sizes, and the uncompressed formats BotW uses
+        - Decoded with the bundled native decoder [texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT license, wheels in `wheels/`); without it, built-in Python decoders are used (everything but ASTC)
     - [ ] Materials
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
         - Does not yet read material attributes or shader settings

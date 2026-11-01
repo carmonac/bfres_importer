@@ -3,5 +3,11 @@ from .base import TextureFormat, fmts, types
 from . import rgb, BCn
 from . import formatinfo
 
-for cls in TextureFormat.__subclasses__():
-    fmts[cls.id] = cls
+
+def _register(cls):
+    for sub in cls.__subclasses__():
+        if sub.id is not None:
+            fmts[sub.id] = sub
+        _register(sub)
+
+_register(TextureFormat)
