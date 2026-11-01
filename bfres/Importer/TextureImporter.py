@@ -8,6 +8,11 @@ import os.path
 import numpy as np
 import time
 
+def _isNormalMap(name):
+    base = name.rsplit('.', 1)[0] if '.' in name else name
+    return base.endswith('_Nrm') or base.endswith('Nrm')
+
+
 class TextureImporter:
     """Imports texture images from BNTX archive."""
 
@@ -30,6 +35,12 @@ class TextureImporter:
             # image.use_alpha = True
 
             pixels = tex.format_.decodePixels(tex.pixels)
+            if type(tex.format_).__name__ == 'BC5' and not _isNormalMap(tex.name):
+                # BC5 stores two channels. decodePixels rebuilds a normal
+                # map's Z in blue, which is meaningless for other data
+                # (e.g. BotW _Spm specular masks): leave blue empty there.
+                pixels = np.array(pixels, dtype=np.float32).reshape(-1, 4)
+                pixels[:, 2] = 0.0
 
             # flip image from dx to gl
             pixels = np.flipud(pixels.reshape((tex.height, tex.width, 4)))
