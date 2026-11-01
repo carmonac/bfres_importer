@@ -133,3 +133,20 @@ def bone_local(scale, rotate, translate, euler, is_root):
 def pose_basis(rest_local, anim_local):
     """Blender pose-bone basis matrices: rest_local^-1 @ anim_local."""
     return np.linalg.inv(rest_local) @ anim_local
+
+
+def srt_to_mapping(sx, sy, rot, tx, ty):
+    """Texture SRT (game UV space) -> Blender Mapping node values.
+
+    Approximates the game transform as uv' = T + R(rot) * S * uv (the exact
+    pivot conventions of the Maya/3dsMax/Softimage modes are not
+    reproduced) and converts it into Blender's V-flipped UV space
+    (v_blender = 1 - v_game): F . G . F with F(u, v) = (u, 1 - v).
+    Works on scalars or numpy arrays. Returns (location xy, rotation z,
+    scale xy); a Mapping node of type POINT computes
+    out = location + R(rotation) * (scale * in).
+    """
+    sx, sy, rot, tx, ty = (np.asarray(v, dtype=np.float64) for v in (sx, sy, rot, tx, ty))
+    loc_x = tx - sy * np.sin(rot)
+    loc_y = 1.0 - ty - sy * np.cos(rot)
+    return (loc_x, loc_y), -rot, (sx, sy)

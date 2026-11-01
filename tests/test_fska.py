@@ -40,11 +40,14 @@ class Builder:
 
 
 def curve_bytes(b, frames, keys, flags, target, scale=1.0, offset=0.0,
-                frame_fmt='<f', key_fmt='<f'):
+                frame_fmt='<f', key_fmt='<f', int_offset=None):
     f_off = b.put(b''.join(struct.pack(frame_fmt, f) for f in frames))
     k_off = b.put(b''.join(struct.pack(key_fmt, k) for row in keys for k in row))
-    return struct.pack('<QQHHI5fi', f_off, k_off, flags, len(frames), target,
-                       frames[0], frames[-1], scale, offset, 0.0, 0)
+    raw = struct.pack('<QQHHI5fi', f_off, k_off, flags, len(frames), target,
+                      frames[0], frames[-1], scale, offset, 0.0, 0)
+    if int_offset is not None:
+        raw = raw[:0x24] + struct.pack('<i', int_offset) + raw[0x28:]
+    return raw
 
 
 @unittest.skipIf(np is None, "numpy not available")
@@ -120,6 +123,16 @@ class FSKATest(unittest.TestCase):
         s, r, t = ba.sample(np.array([0.0]), (2, 2, 2), (0.1, 0.2, 0.3, 1), (4, 5, 6))
         np.testing.assert_allclose(s[0], [2, 2, 2])
         np.testing.assert_allclose(t[0], [4, 5, 6])
+
+    def test_step_int_offset_is_an_integer(self):
+        # texture pattern curves: sbyte keys plus an int32 offset (here 7)
+        F = self.F
+        b = Builder()
+        raw = curve_bytes(b, [0, 1, 2], [[-7], [-6], [1]],
+                          (F.CURVE_STEP_INT << 4) | (F.KEY_SBYTE << 2) | F.FRAME_BYTE, 0,
+                          scale=0.0, frame_fmt='<B', key_fmt='<b', int_offset=7)
+        c = F.AnimCurve(bytes(b.buf) + raw, len(b.buf))
+        np.testing.assert_allclose(c.evaluate([0, 1, 2]), [0, 1, 8])
 
     def test_bad_magic(self):
         with self.assertRaises(self.F.FSKAError):

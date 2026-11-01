@@ -150,6 +150,7 @@ class Importer(ModelImporter):
 
         if getattr(self.operator, 'import_animations', True):
             self._importSkeletalAnims()
+            self._importMaterialAnims()
 
         return {'FINISHED'}
 
@@ -158,6 +159,22 @@ class Importer(ModelImporter):
     # existing armature (e.g. a model's *_Animation.sbfres).
     animationsOnly = False
     targetArmature = None
+    targetMaterials = None
+
+    def _importMaterialAnims(self):
+        from .MaterialAnimationImporter import MaterialAnimationImporter
+        try:
+            sets = self.fres.readMaterialAnims()
+        except Exception:
+            log.exception("Could not read material animations")
+            return
+        if not sets:
+            return
+        # materials of the model imported with this file (or its parent
+        # import); otherwise every material imported by this add-on
+        materials = self.targetMaterials or self.__dict__.get('createdMaterials') \
+            or [m for m in bpy.data.materials if m.get('bfres_name')]
+        self.materialActions = MaterialAnimationImporter(self.context).import_anims(sets, materials)
 
     def _importSkeletalAnims(self):
         from .AnimationImporter import AnimationImporter, find_target_armature
