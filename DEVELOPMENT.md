@@ -41,6 +41,10 @@ The list of models is `tools/corpus/botw.txt`; `--list` picks another one and
 python3 tools/extract_corpus.py <romfs> /tmp/x --grep '^Model/Enemy_Lynel'
 ```
 
+`tools/corpus/botw_vis.txt` lists a few extra models with bone visibility
+animations (FVIS), which none of the main corpus has; extract them to their
+own folder (`~/Documents/bfres_corpus/botw_vis`) with `--list`.
+
 Keep the corpus outside the repository.
 
 ## Headless import harness

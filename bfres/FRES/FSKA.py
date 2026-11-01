@@ -94,8 +94,14 @@ class AnimCurve:
         self.frames = frames.astype(np.float64)
 
         per_key = {CURVE_CUBIC: 4, CURVE_LINEAR: 2}.get(self.curve_type, 1)
+        if self.curve_type in (CURVE_STEP_BOOL, CURVE_BAKED_BOOL):
+            # one bit per key, packed LSB first in 32-bit words
+            words = np.frombuffer(data, '<u4', (n + 31) // 32, keys_off)
+            bits = (words[:, None] >> np.arange(32, dtype=np.uint32)) & 1
+            self.keys = bits.reshape(-1)[:n].astype(np.float64).reshape(n, 1)
+            return
         if self.key_type == KEY_SINGLE:
-            dt = '<u4' if self.curve_type in (CURVE_STEP_INT, CURVE_STEP_BOOL) else '<f4'
+            dt = '<i4' if self.curve_type == CURVE_STEP_INT else '<f4'
         elif self.key_type == KEY_INT16:
             dt = '<i2'
         elif self.key_type == KEY_SBYTE:
@@ -125,7 +131,9 @@ class AnimCurve:
             return v * scale + self.offset
         if self.curve_type == CURVE_LINEAR:
             return (k[i, 0] + t * k[i, 1]) * scale + self.offset
-        if self.curve_type in (CURVE_STEP_INT, CURVE_STEP_BOOL, CURVE_BAKED_INT, CURVE_BAKED_BOOL):
+        if self.curve_type in (CURVE_STEP_BOOL, CURVE_BAKED_BOOL):
+            return k[i, 0]
+        if self.curve_type in (CURVE_STEP_INT, CURVE_BAKED_INT):
             return k[i, 0] + self.offset
         return k[i, 0] * scale + self.offset
 

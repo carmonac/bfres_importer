@@ -212,8 +212,21 @@ class FRES(DumpMixin):
 
         self.models = self._readObjects(FMDL, 'fmdl',
             FMDLHeader.size)
-        # XXX fvis, fshu, fscn (fska/fmaa: see readSkeletalAnims/readMaterialAnims)
+        # XXX fshu, fscn (fska/fmaa/fvis: see readSkeletalAnims and others)
 
+
+    def readVisibilityAnims(self):
+        """Parse the FVIS (bone/material visibility animation) section."""
+        from . import FVIS
+        cnt  = self.header.get('fvis_cnt', 0)
+        offs = self.header.get('fvis_offset', 0)
+        if not cnt or not offs:
+            return []
+        if self.header['version'] == (0, 10):
+            log.info("Visibility animations in BFRES v10 are not supported yet (%d skipped)", cnt)
+            return []
+        data = self.read(self.file.size, 0)
+        return FVIS.read_all(data, offs, cnt)
 
     def readMaterialAnims(self):
         """Parse the FMAA (material animation) section, like

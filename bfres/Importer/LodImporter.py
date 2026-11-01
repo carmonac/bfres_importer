@@ -140,6 +140,10 @@ class LodImporter:
             mesh.free()
         meshObj = bpy.data.objects.new(name=fshpMesh.name, object_data=fshpMesh)
         mdata   = meshObj.data
+        # the shape's bone: bone visibility animations (FVIS) hide its shapes
+        bones = self.fmdl.skeleton.bones
+        if self.fshp.header['single_bind'] < len(bones):
+            meshObj['bfres_bone'] = bones[self.fshp.header['single_bind']].name
 
         # Custom split normals from `_n0`, so shading matches the game.
         # Blender applies them to flat faces too, so leave them out when

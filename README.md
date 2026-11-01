@@ -33,7 +33,10 @@ This addon is currently in heavy development and large portions of it do not wor
         - Texture SRT (scrolling water...) keyframed on Mapping nodes
         - Texture patterns (BotW color variants, dyes, wing blur) as a texture switch
         - Other shader parameters as animated `param_<name>` material properties
-        - Visibility animations (FVIS, material visibility) not yet
+        - Material visibility (`*_fvm`) as `hide_viewport`/`hide_render` keys on the objects using the material
+    - [x] Visibility animations (FVIS, BFRES 5.x)
+        - Bone visibility hides the shapes bound to the bone (constant keys on the objects)
+        - Shares the action of the skeletal animation with the same name, if any
 
 # Resources
 - https://wiki.wexosmk.xyz/index.php/BFRES_(File_Format)/Switch

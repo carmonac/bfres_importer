@@ -139,6 +139,7 @@ class Importer(ModelImporter):
             self._importFresEmbed(file)
 
         # import the models.
+        existing = set(bpy.data.objects)
         if not self.animationsOnly:
             for i, model in enumerate(self.fres.models):
                 log.info("Importing model    %3d / %3d...",
@@ -148,6 +149,8 @@ class Importer(ModelImporter):
         if getattr(self.operator, 'import_animations', True):
             self._importSkeletalAnims()
             self._importMaterialAnims()
+            self._importVisibilityAnims(
+                [ob for ob in bpy.data.objects if ob not in existing and ob.type == 'ARMATURE'])
 
         return {'FINISHED'}
 
@@ -172,6 +175,45 @@ class Importer(ModelImporter):
         materials = self.targetMaterials or self.__dict__.get('createdMaterials') \
             or [m for m in bpy.data.materials if m.get('bfres_name')]
         self.materialActions = MaterialAnimationImporter(self.context).import_anims(sets, materials)
+
+    def _importVisibilityAnims(self, armatures):
+        from .VisibilityAnimationImporter import VisibilityAnimationImporter
+        try:
+            anims = self.fres.readVisibilityAnims()
+        except Exception:
+            log.exception("Could not read visibility animations")
+            return
+        if not anims:
+            return
+        materials = self.targetMaterials or self.__dict__.get('createdMaterials') \
+            or [m for m in bpy.data.materials if m.get('bfres_name')]
+        # the meshes of the model each animation is for: the armature (of
+        # this import, or the one its animations go on) with the most bones
+        # named in it, as bone names like "Root" repeat across models
+        if self.targetArmature is not None:
+            armatures = [self.targetArmature]
+        def meshes_of(arm):
+            return [ob for ob in bpy.data.objects if ob.type == 'MESH'
+                    and any(m.type == 'ARMATURE' and m.object == arm for m in ob.modifiers)]
+        groups = {}
+        for anim in anims:
+            if anim.is_material or not armatures:
+                groups.setdefault(None, []).append(anim)
+                continue
+            names = set(anim.names)
+            arm = max(armatures, key=lambda a: len(names & set(a.data.bones.keys())))
+            groups.setdefault(arm, []).append(anim)
+        # the game plays a model's skeletal and visibility animations of the
+        # same name together (e.g. FldObj_Mound_A_01_Break): share the action
+        shared = {a['bfres_name']: a for a in self.__dict__.get('actions') or []
+                  if a.get('bfres_name')}
+        imp = VisibilityAnimationImporter(self.context)
+        self.visibilityActions = []
+        for arm, group in groups.items():
+            objects = meshes_of(arm) if arm is not None else \
+                [ob for a in armatures for ob in meshes_of(a)] if armatures else \
+                [ob for ob in bpy.data.objects if ob.type == 'MESH']
+            self.visibilityActions += imp.import_anims(group, objects, materials, shared)
 
     def _importSkeletalAnims(self):
         from .AnimationImporter import AnimationImporter, find_target_armature

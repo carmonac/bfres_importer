@@ -24,12 +24,19 @@ ParamAnimInfo (0x18): name, u16 begin curve, float curves, int curves,
 PatternAnimInfo (0x10): name, s16 curve index, u16 begin constant,
   s8 sub-bind index
 AnimConstant (8): u32 target offset, 32-bit value (float or int)
+
+Material visibility ("*_fvm" animations): the material has a boolean step
+curve (one bit per key) that no parameter or pattern uses. The curve
+indices stored in MaterialAnimData are begin indices into the curves of
+the whole FMAA, so the visibility curve is identified as the material's
+leftover boolean curve instead.
 """
 import struct
 
 import numpy as np
 
-from .FSKA import AnimCurve, CURVE_SIZE, FLAG_LOOP, _str
+from .FSKA import (AnimCurve, CURVE_SIZE, FLAG_LOOP, _str,
+                   CURVE_STEP_BOOL, CURVE_BAKED_BOOL)
 
 FMAA_SIZE = 0x78
 MAT_ANIM_SIZE = 0x40
@@ -113,6 +120,17 @@ class MaterialAnim:
             curve = curves[curve_idx] if 0 <= curve_idx < len(curves) else None
             const = consts[begin_const][1] if begin_const != NONE16 and begin_const < len(consts) else None
             self.patterns.append(PatternAnim(_str(data, pname), curve, const))
+
+        used = {id(c) for p in self.params for c in p.curves.values()}
+        used |= {id(p.curve) for p in self.patterns if p.curve is not None}
+        self.visibility = next((c for c in curves if id(c) not in used
+                                and c.curve_type in (CURVE_STEP_BOOL, CURVE_BAKED_BOOL)), None)
+
+    def sample_visibility(self, frames):
+        """Visibility of the material per frame (bool array), or None."""
+        if self.visibility is None:
+            return None
+        return self.visibility.evaluate(frames) > 0.5
 
 
 class MaterialAnimSet:

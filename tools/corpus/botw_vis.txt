@@ -1,0 +1,13 @@
+# Breath of the Wild models with bone visibility animations (FVIS).
+# Extract to a separate folder:
+#   extract_corpus.py <romfs> ~/Documents/bfres_corpus/botw_vis --list tools/corpus/botw_vis.txt
+
+# Arrows disappear one by one (Quiver_Fluctuate).
+Weapon_Quiver_001
+
+# Two models; Wait (looping) hides the fragments, Break swaps the intact
+# mound for 52 fragments, together with the skeletal Break animation.
+FldObj_Mound_A
+
+# "Invisible" hides the armor and shows the torso.
+Mannequin_009
