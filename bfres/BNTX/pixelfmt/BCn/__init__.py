@@ -8,7 +8,7 @@
 ################################################################
 ################################################################
 
-from . import decompress_
+from . import decode
 from .. import TextureFormat
 import numpy as np
 
@@ -35,7 +35,7 @@ class BC1(TextureFormat):
             return b''
 
         data = data[:csize]
-        return decompress_.decompressDXT1(data, width, height)
+        return decode.bc1(data, width, height)
     
 class BC2(TextureFormat):
     id = 0x1b
@@ -60,7 +60,7 @@ class BC2(TextureFormat):
             return b''
 
         data = data[:csize]
-        return decompress_.decompressDXT3(data, width, height)
+        return decode.bc2(data, width, height)
     
 class BC3(TextureFormat):
     id = 0x1c
@@ -85,7 +85,7 @@ class BC3(TextureFormat):
             return b''
 
         data = data[:csize]
-        return decompress_.decompressDXT5(data, width, height)
+        return decode.bc3(data, width, height)
 
 class BC4(TextureFormat):
     id = 0x1d
@@ -111,7 +111,7 @@ class BC4(TextureFormat):
             return b''
 
         data = data[:csize]
-        return decompress_.decompressBC4(data, width, height, SNORM)
+        return decode.bc4(data, width, height, bool(SNORM))
     
     def decodePixels(self, data):
         rgba = np.empty(len(data)*4)
@@ -143,7 +143,7 @@ class BC5(TextureFormat):
             return b''
 
         data = data[:csize]
-        return decompress_.decompressBC5(data, width, height, SNORM)
+        return decode.bc5(data, width, height, bool(SNORM))
     
     def decodePixels(self, data):
         r = data[0].astype(np.float32) / 255
