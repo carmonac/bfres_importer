@@ -74,6 +74,10 @@ class AnimCurve:
         (frames_off, keys_off, self.flags, n, self.target,
          self.start, self.end, self.scale, self.offset, self.delta) = \
             struct.unpack_from('<QQHHI5f', data, offset)
+        if ((self.flags >> 4) & 0x7) in (CURVE_STEP_INT, CURVE_BAKED_INT,
+                                         CURVE_STEP_BOOL, CURVE_BAKED_BOOL):
+            # integer curves store their offset as an int32, not a float
+            self.offset, = struct.unpack_from('<i', data, offset + 0x24)
         self.frame_type = self.flags & 0x3
         self.key_type = (self.flags >> 2) & 0x3
         self.curve_type = (self.flags >> 4) & 0x7
