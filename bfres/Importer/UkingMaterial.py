@@ -286,6 +286,10 @@ class UkingMaterialBuilder:
         ao = parse('uking_ao_color', 'uking_ao_channel') if on('uking_enable_ao') else None
         if albedo is not None:
             self._combined_albedo(albedo, ao, by_role.get('ao'))
+            # alpha comes from uking_transparency_color; when that isn't
+            # understood, keep the albedo texture's alpha as before (the
+            # combined albedo's alpha is usually just a constant 1)
+            self._role_alpha(by_role.get('albedo'))
         else:
             self._albedo(by_role.get('albedo'), by_role.get('ao'), ao)
         alpha = parse('uking_transparency_color', 'uking_transparency_channel')
@@ -382,7 +386,16 @@ class UkingMaterialBuilder:
         if ao is not None:
             color = self._multiply(color, ao, 'albedo x AO', -300, 450)
         self.links.new(color, self.bsdf.inputs['Base Color'])
-        self._alpha_source = self.nc.alpha(expr)
+
+    def _role_alpha(self, entry):
+        if not entry:
+            return
+        sampler, _, image, uv = entry
+        tex = self._image(image, 'albedo', sampler, uv, -700, 500)
+        if image.get('bfres_format') in SINGLE_CHANNEL_FORMATS:
+            self._alpha_source = self._red(tex, -450, 700)
+        else:
+            self._alpha_source = tex.outputs['Alpha']
 
     def _combined_normal(self, n0, n1, ratio):
         mix = self._node('ShaderNodeMix', -450, -350, 'normal blend')
