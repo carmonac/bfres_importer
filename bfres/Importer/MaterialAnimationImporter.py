@@ -26,6 +26,7 @@ import bpy
 import numpy as np
 
 from . import animmath
+from .TextureImporter import find_image
 
 LINEAR, CONSTANT = 1, 0  # Keyframe.interpolation enum values
 SRT_OFFSETS = {'sx': 4, 'sy': 8, 'rot': 12, 'tx': 16, 'ty': 20}
@@ -109,7 +110,7 @@ class MaterialAnimationImporter:
                     for mat in materials_named(ma.name, materials):
                         lst = wanted.setdefault((mat.name, pt.name), [])
                         for n in names:
-                            if n not in lst and bpy.data.images.get(n) is not None:
+                            if n not in lst and find_image(n, mat.get('bfres_family')) is not None:
                                 lst.append(n)
         switches = {}
         for (mat_name, sampler), names in wanted.items():
@@ -126,10 +127,12 @@ class MaterialAnimationImporter:
         nt = mat.node_tree
         # keep the material's own texture as index 0 (the look when the
         # animation is not playing)
-        if node.image is not None and node.image.name in names:
-            names = [node.image.name] + [n for n in names if n != node.image.name]
-        elif node.image is not None:
-            names = [node.image.name] + names
+        # game texture names (images may have been renamed, see TextureImporter)
+        cur = node.image.get('bfres_texture') or node.image.name if node.image is not None else None
+        if cur is not None and cur in names:
+            names = [cur] + [n for n in names if n != cur]
+        elif cur is not None:
+            names = [cur] + names
         index = {n: i for i, n in enumerate(names)}
         if len(names) == 1:
             return index
@@ -144,7 +147,7 @@ class MaterialAnimationImporter:
         color, alpha = node.outputs['Color'], node.outputs['Alpha']
         for i, name in enumerate(names[1:], start=1):
             img = nodes.new('ShaderNodeTexImage')
-            img.image = bpy.data.images[name]
+            img.image = find_image(name, mat.get('bfres_family'))
             img.label = '%s [%d]' % (name, i)
             img.location = (node.location.x, node.location.y - 260 * i)
             if vec_src is not None:

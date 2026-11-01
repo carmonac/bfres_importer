@@ -4,6 +4,7 @@ import bpy
 from bpy_extras.node_shader_utils import PrincipledBSDFWrapper
 import struct
 from . import UkingMaterial
+from .TextureImporter import find_image, family
 
 class MaterialImporter:
     """Imports material from FMDL."""
@@ -22,6 +23,9 @@ class MaterialImporter:
         # original name: Blender may rename duplicates (Mt_Body.001), but
         # material animations refer to materials by their game name
         mat['bfres_name'] = fmat.name
+        # the model whose textures this material uses (see find_image)
+        fam = family(self.parent.path)
+        mat['bfres_family'] = fam
         self.parent.__dict__.setdefault('createdMaterials', []).append(mat)
         self._addCustomProperties(fmat, mat)
 
@@ -29,7 +33,7 @@ class MaterialImporter:
                                     fmat.header.get('shader_name2')):
             textures = []
             for sampler, info in fmat.textureSamplers.items():
-                image = bpy.data.images.get(info['textureName'])
+                image = find_image(info['textureName'], fam)
                 if image is None:
                     log.info("Texture %s missing", info['textureName'])
                     continue
@@ -56,12 +60,10 @@ class MaterialImporter:
             sampler = fragSamplerKey
             texName = texSampler['textureName']
 
-            if not bpy.data.images.get(texName):
-                log.info ("Texture %s missing",
-                    texName)
+            image = find_image(texName, fam)
+            if image is None:
+                log.info("Texture %s missing", texName)
                 continue
-
-            image = bpy.data.images[texName]
 
             match sampler:
                 case "_a0": # albedo (regular texture)
@@ -109,19 +111,6 @@ class MaterialImporter:
             textureHelper.image = image
             # add mapping here, the helper has locrotscale attributes
         return mat
-
-
-    def _importTexture(self, fmat, tex):
-        """Import specified texture to specified material."""
-        # do we use the texid anymore?
-        texid   = tex['name'].replace('.', '_') # XXX ensure unique
-        texture = bpy.data.textures.new(name=texid, type ='IMAGE')
-        try:
-            texture.image = bpy.data.images[tex['name']]
-        except KeyError:
-            log.error("Texture not found: '%s'", tex['name'])
-        return texture
-
 
     def _addCustomProperties(self, fmat, mat):
         """Add render/shader/material parameters and sampler list
