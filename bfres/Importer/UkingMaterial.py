@@ -14,8 +14,15 @@ The UV set of a texture comes from the slot that consumes it:
 (dictionary order). Tangent data in the game files confirms both this and
 that normal maps need no green-channel flip after the importer's V flip.
 
-What is built (a faithful translation of the common case, not an
-emulation of the color combiner):
+Color combiner: uking_mat combines textures, vertex colors and constants
+in up to 14 stages (`uking_colorN_*`) and picks each output (albedo,
+transparency, AO, specular mask, metalness, emission, second normal map
+blend) from them. uking_combiner decodes the part of that language that
+is understood; an output whose whole chain is understood is built from it
+(NodeCombiner), any other output falls back to the role-based translation
+below.
+
+Role-based translation (the common case):
   albedo (+ AO multiplied in) -> Base Color, albedo alpha (or the only
   channel of a BC4 albedo) -> Alpha, clipped at gsys_alpha_test_value for
   alpha-tested materials, blended for translucent / color-blended ones,

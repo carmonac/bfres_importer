@@ -22,8 +22,8 @@ This addon is currently in heavy development and large portions of it do not wor
         - Identical textures reuse the image already in the file (e.g. a model imported twice); a different texture with a name already taken is renamed `<model>:<texture>`
     - [ ] Materials
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
-        - Does not yet read material attributes or shader settings
-        - Textures use default mapping to the first UV map only
+        - BotW (`uking_mat`): part of the color combiner is emulated (copy, multiply and mix stages; textures, vertex color, `const_color*`/`const_value*`): layer blends (rock/moss, wall A/B by vertex alpha), ambient occlusion from vertex color, specular/metal/alpha from the channel the shader reads, second normal map blend. Other combiner stages fall back to the texture roles
+        - UV layer and texture SRT per sampler from the shader options
     - [x] Bones 
         - Bones import with proper parents, not connected tip to tail by default
         - "Auto Connect Bones" points each bone at its chain child (heads, skinning and animations stay exact)
