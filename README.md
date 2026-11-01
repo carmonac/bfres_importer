@@ -16,6 +16,7 @@ This addon is currently in heavy development and large portions of it do not wor
         - Tangents / bitangents as `_t0` / `_b0` vector attributes, their sign in `_t0_w` / `_b0_w`
     - [x] Textures
         - BC1-BC7 (BC6H as a float/HDR image), all ASTC block sizes, and the uncompressed formats BotW uses
+        - Only the first mip level and, for array / cube textures (none in BotW), the first layer become images; the others can be decoded through the BNTX API
         - Decoded with the bundled native decoder [texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT license, wheels in `wheels/`); without it, built-in Python decoders are used (everything but ASTC)
     - [ ] Materials
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
@@ -72,7 +73,7 @@ Very much in development and may be full of bugs and rough corners.
 - Decompressing is slow
     - Progress indicator sucks, but I don't think Blender provides any way to do a better one
 - `Animal_Bee`'s UV map is all wrong
-- Some texture formats might not decode correctly
+- Uncompressed formats other than R8 and RGBA8 are only checked with synthetic data
 - Extra files in the FRES, which are neither text nor a supported format, are discarded
     - The game probably never does this, but it's technically possible
 
