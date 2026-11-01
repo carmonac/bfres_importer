@@ -32,6 +32,9 @@ class TextureImporter:
 
             image = bpy.data.images.new(name=tex.name,
                 width=tex.width, height=tex.height)
+            # remember the source format: material building needs to know
+            # e.g. that a BC4 texture only has one meaningful channel
+            image['bfres_format'] = type(tex.format_).__name__
             # image.use_alpha = True
 
             pixels = tex.format_.decodePixels(tex.pixels)

@@ -16,8 +16,10 @@ that normal maps need no green-channel flip after the importer's V flip.
 
 What is built (a faithful translation of the common case, not an
 emulation of the color combiner):
-  albedo (+ AO multiplied in) -> Base Color, albedo alpha -> Alpha
-  (clipped at gsys_alpha_test_value for 'mask' materials), normal map,
+  albedo (+ AO multiplied in) -> Base Color, albedo alpha (or the only
+  channel of a BC4 albedo) -> Alpha, clipped at gsys_alpha_test_value for
+  alpha-tested materials, blended for translucent / color-blended ones,
+  normal map,
   specular mask (red channel, scaled) -> Specular IOR Level, metalness,
   emission color (x emission mask), backface culling from
   gsys_render_state_display_face. Other textures (second layers, terrain
@@ -50,6 +52,7 @@ SUFFIX_ROLES = {
     'EmmMsk': 'emission_mask', 'Mtl': 'metalness', 'AO': 'ao',
 }
 COLOR_ROLES = {'albedo', 'emission'}
+SINGLE_CHANNEL_FORMATS = {'BC4'}
 DATA_ROLES = {'normal', 'specular', 'metalness', 'ao', 'emission_mask', 'opacity'}
 
 
@@ -206,7 +209,12 @@ class UkingMaterialBuilder:
             self.links.new(ao_tex.outputs['Color'], mix.inputs['B'])
             color = mix.outputs['Result']
         self.links.new(color, self.bsdf.inputs['Base Color'])
-        self._alpha_source = tex.outputs['Alpha']
+        if image.get('bfres_format') in SINGLE_CHANNEL_FORMATS:
+            # a one-channel "albedo" (e.g. the bee's wing blur, BC4) has no
+            # alpha of its own: its channel is the mask
+            self._alpha_source = self._red(tex, -450, 700)
+        else:
+            self._alpha_source = tex.outputs['Alpha']
 
     def _normal(self, entry):
         if not entry:
@@ -268,6 +276,7 @@ class UkingMaterialBuilder:
         mode = render_info(fmat, 'gsys_render_state_mode', 'opaque')
         alpha_test = render_info(fmat, 'gsys_alpha_test_enable', 'false') == 'true'
         threshold = render_info(fmat, 'gsys_alpha_test_value', 0.5)
+        blend = render_info(fmat, 'gsys_render_state_blend_mode', 'none')
         try:
             threshold = float(threshold)
         except (TypeError, ValueError):
@@ -280,7 +289,7 @@ class UkingMaterialBuilder:
             cmp.inputs[1].default_value = threshold - 1e-4
             self.links.new(self._alpha_source, cmp.inputs[0])
             self.links.new(cmp.outputs['Value'], self.bsdf.inputs['Alpha'])
-        elif self._alpha_source is not None and mode == 'translucent':
+        elif self._alpha_source is not None and (mode == 'translucent' or blend == 'color'):
             self.links.new(self._alpha_source, self.bsdf.inputs['Alpha'])
             if hasattr(mat, 'surface_render_method'):
                 mat.surface_render_method = 'BLENDED'
