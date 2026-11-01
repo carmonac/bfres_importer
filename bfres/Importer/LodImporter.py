@@ -49,30 +49,34 @@ class LodImporter:
 
         #log.debug("LOD submeshes: %s", self.lod.submeshes)
 
+        # Faces index into one vertex array shared by every submesh, so
+        # read each vertex once, up to the highest index any submesh uses.
+        nVtxs = 0
         for i, submesh in enumerate(self.lod.submeshes):
-            log.debug("Reading submesh %d...", i)
             idxs = submesh['idxs']
             if len(idxs) == 0:
                 raise MalformedFileError("Submesh %d is empty" % i)
-            #log.debug("Submesh idxs (%d): %s", len(idxs), idxs)
-            for idx in range(max(idxs)+1):
-                for attr in self.fvtx.attrs:
-                    fmt  = attr.format
-                    func = fmt.get('func', None)
-                    size = struct.calcsize(fmt['fmt'])
-                    buf  = self.fvtx.buffers[attr.buf_idx]
-                    offs = attr.buf_offs + (idx * buf.stride)
-                    data = buf.data[offs : offs + size]
-                    try:
-                        data = struct.unpack(fmt['fmt'], data)
-                    except struct.error:
-                        log.error("Submesh %d reading out of bounds for attribute '%s' (offs=0x%X len=0x%X fmt=%s)",
-                            i, attr.name, offs, len(buf.data),
-                            fmt['fmt'])
-                        raise MalformedFileError("Submesh %d reading out of bounds for attribute '%s'" % (
-                            i, attr.name))
-                    if func: data = func(data)
-                    attrBuffers[attr.name].append(data)
+            nVtxs = max(nVtxs, max(idxs) + 1)
+        if len(self.lod.idx_buf):
+            nVtxs = max(nVtxs, max(self.lod.idx_buf) + 1)
+
+        for idx in range(nVtxs):
+            for attr in self.fvtx.attrs:
+                fmt  = attr.format
+                func = fmt.get('func', None)
+                size = struct.calcsize(fmt['fmt'])
+                buf  = self.fvtx.buffers[attr.buf_idx]
+                offs = attr.buf_offs + (idx * buf.stride)
+                data = buf.data[offs : offs + size]
+                try:
+                    data = struct.unpack(fmt['fmt'], data)
+                except struct.error:
+                    log.error("Vertex %d reading out of bounds for attribute '%s' (offs=0x%X len=0x%X fmt=%s)",
+                        idx, attr.name, offs, len(buf.data), fmt['fmt'])
+                    raise MalformedFileError("Vertex %d reading out of bounds for attribute '%s'" % (
+                        idx, attr.name))
+                if func: data = func(data)
+                attrBuffers[attr.name].append(data)
 
         #for name, data in attrBuffers.items():
         #    print("%s: %s" % (
@@ -143,16 +147,28 @@ class LodImporter:
             raise MalformedFileError("LOD submesh faces are out of bounds")
 
     def _createFacesBasic(self, idxs, mesh, step, nVtxs):
-        for i in range(0, len(idxs), step):
+        smooth = self.parent.operator.smooth_faces
+        skipped = 0
+        for i in range(0, len(idxs) - nVtxs + 1, step):
             try:
-                vs   = list(mesh.verts[j] for j in idxs[i:i+nVtxs])
-                #log.debug("face %d: %s", i, vs)
-                face = mesh.faces.new(vs)
-                face.smooth = self.parent.operator.smooth_faces
+                vs = [mesh.verts[j] for j in idxs[i:i+nVtxs]]
             except IndexError:
                 log.error("LOD submesh face %d is out of bounds (max %d)",
                     i, len(idxs))
                 raise
+            try:
+                face = mesh.faces.new(vs)
+            except ValueError:
+                # The game data can repeat a triangle over the same vertices
+                # (e.g. the back side of a double-sided surface) or contain
+                # degenerate triangles; Blender rejects both. Blender draws
+                # both sides of a face anyway, so these are safe to drop.
+                skipped += 1
+                continue
+            face.smooth = smooth
+        if skipped:
+            log.warning("%s: skipped %d duplicate or degenerate face(s)",
+                self.lodName, skipped)
 
     def _createFaces_point_list(self, idxs, mesh):
         return self._createFacesBasic(idxs, mesh, 1, 1)
