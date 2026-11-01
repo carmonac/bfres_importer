@@ -31,10 +31,10 @@ images (no game data):
        python3 tools/test_textures.py corpus ~/Documents/bfres_corpus/botw
 
 4. ``levels`` (any Python with numpy) decodes every mip level and array
-   layer of every texture in a folder and compares each level with a 2x2
-   box reduction of the one above it: a level deswizzled with the wrong
-   block height comes out scrambled, far from the reduction (mean
-   difference > 0.1)::
+   layer of every texture in a folder and compares each level (8x8 or
+   larger) with a 2x2 box reduction of the one above it: a level
+   deswizzled with the wrong block height comes out scrambled, far from
+   the reduction (mean RGB difference > 0.1)::
 
        python3 tools/test_textures.py levels ~/Documents/bfres_corpus/botw
 """
@@ -486,8 +486,11 @@ def levels(folder, limit=0.1):
                             fails += 1
                             print("FAIL %s %s level %d layer %d: %s" % (fn, tex.name, m, layer, ex))
                             break
-                        if prev is not None and not hdr:
-                            d = float(np.abs(_reduce(prev, px.shape[1], px.shape[0]) - px).mean())
+                        # RGB only (alpha-tested foliage keeps its coverage
+                        # in the small levels) and levels of 8x8 or more
+                        if prev is not None and not hdr and min(px.shape[:2]) >= 8:
+                            red = _reduce(prev, px.shape[1], px.shape[0])
+                            d = float(np.abs(red[..., :3] - px[..., :3]).mean())
                             if d > worst[0]:
                                 worst = (d, "%s %s level %d layer %d" % (fn, tex.name, m, layer))
                             if d > limit:

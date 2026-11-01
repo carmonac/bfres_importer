@@ -1,0 +1,28 @@
+# Breath of the Wild models for the texture layout checks (issue #11):
+# non-power-of-two sizes, mip chains where the per-level block height
+# matters, and the unusual channel selectors (tools/scan_textures.py).
+# Extract to a separate folder:
+#   extract_corpus.py <romfs> ~/Documents/bfres_corpus/botw_swz --list tools/corpus/botw_swz.txt
+# and check every mip level:
+#   python3 tools/test_textures.py levels ~/Documents/bfres_corpus/botw_swz
+
+# 450x526 BC1 leaves: the old block-height rule broke mip levels 4+.
+Obj_TreeConiferous_B
+
+# 512x261 BC1 normal map, same problem; 1024x521 albedo.
+TwnObj_City_GerudoFurniture_A
+
+# 207x30 BC3 text (block height 1 from level 0).
+DgnObj_HingeBoard_A
+
+# BC5 albedo with selectors RRRG (gray + alpha in green).
+Obj_Moon_A
+
+# BC4 bake maps with selectors R000.
+DgnObj_AncientBallSwitch_A
+
+# BC1 normal map with selectors RGB1.
+Enemy_Chuchu
+
+# R8 texture (RRR1).
+FldObj_PileLogs_A
