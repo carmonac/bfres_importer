@@ -10,6 +10,8 @@ Switch BFRES attribute format IDs (SwitchAttribFormat in BfresLibrary) are
 
 `decode()` returns an (n, components) array: float32 for normalized and
 float formats (UNorm -> 0..1, SNorm -> -1..1), int32 for integer formats.
+`to_float()` / `rgba()` turn any decoded attribute into floats for Blender
+attributes (vertex colors and the like).
 """
 import numpy as np
 
@@ -122,3 +124,46 @@ def decode(fmt_id, data, offset, stride, count):
     if typ in (UINT, SINT):
         return vals.astype(np.int64 if bits == 32 else np.int32)
     raise AttributeFormatError("Unknown attribute component type in format 0x%04X" % fmt_id)
+
+
+def bits(fmt_id):
+    """Bits per component of a format (10 for 10_10_10_2)."""
+    layout = fmt_id >> 8
+    if layout == PACKED_10_10_10_2:
+        return 10
+    try:
+        return LAYOUTS[layout][1]
+    except KeyError:
+        raise AttributeFormatError("Unknown attribute layout in format 0x%04X" % fmt_id)
+
+
+def to_float(fmt_id, vals):
+    """Decoded attribute values as float32 in their natural range.
+
+    Normalized and float formats are already floats and pass through.
+    Integer formats used where a normalized value is expected (e.g. a
+    color stored as UInt) are scaled like UNorm / SNorm of the same size:
+    UInt -> 0..1, SInt -> -1..1.
+    """
+    vals = np.asarray(vals)
+    if vals.dtype.kind == 'f':
+        return vals.astype(np.float32, copy=False)
+    typ, b = fmt_id & 0xFF, bits(fmt_id)
+    if typ == SINT:
+        return np.maximum(vals / float((1 << (b - 1)) - 1), -1.0).astype(np.float32)
+    return (vals / float((1 << b) - 1)).astype(np.float32)
+
+
+def rgba(fmt_id, vals):
+    """(n, 4) float32 RGBA from a decoded color attribute of 1..4
+    components; missing channels are 0 and a missing alpha is 1.
+    Values are not clamped: BotW also stores data (half floats beyond 1,
+    signed values) in vertex colors."""
+    vals = to_float(fmt_id, vals)
+    if vals.ndim == 1:
+        vals = vals[:, None]
+    n, c = vals.shape
+    out = np.zeros((n, 4), np.float32)
+    out[:, 3] = 1.0
+    out[:, :min(c, 4)] = vals[:, :4]
+    return out

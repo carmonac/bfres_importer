@@ -34,6 +34,8 @@ class LodImporter:
         self.meshObj = self._createMesh()
 
         self._addUvMap()
+        self._addColors()
+        self._addTangents()
         self._addVertexWeights()
         self._addArmature()
         
@@ -59,7 +61,9 @@ class LodImporter:
             nVtxs = max(nVtxs, max(self.lod.idx_buf) + 1)
 
         attrBuffers = {}
+        self.attrFormats = {}
         for attr in self.fvtx.attrs:
+            self.attrFormats[attr.name] = attr.formatID
             buf = self.fvtx.buffers[attr.buf_idx]
             try:
                 attrBuffers[attr.name] = attrdecode.decode(attr.formatID,
@@ -83,8 +87,18 @@ class LodImporter:
     def _vertexNormals(self, n0):
         """Per-vertex normals in Blender space, consistent with how
         `_addVerticesToMesh` places the positions."""
+        out = self._rotateDirections(n0)
+        length = np.linalg.norm(out, axis=1, keepdims=True)
+        length[length == 0] = 1
+        return out / length
+
+
+    def _rotateDirections(self, vecs):
+        """Rotate per-vertex direction vectors (normals, tangents...; the
+        first three components of `vecs`) into Blender space with the same
+        rotation `_vertexPositions` applies to the positions."""
         skin = self.fshp.header['vtx_skin_cnt']
-        n = np.asarray(n0, dtype=np.float64)[:, :3]
+        n = np.asarray(vecs, dtype=np.float64)[:, :3]
         if skin == 0:
             # rigid mesh bound to one bone: rotate like the positions
             R = np.array(self._boneRotation(
@@ -102,9 +116,7 @@ class LodImporter:
         else:
             # skinned mesh: bind pose is in model space, Y-up -> Z-up
             out = np.stack((n[:, 0], -n[:, 2], n[:, 1]), axis=1)
-        length = np.linalg.norm(out, axis=1, keepdims=True)
-        length[length == 0] = 1
-        return out / length
+        return out
 
 
     def _createMesh(self):
@@ -129,10 +141,12 @@ class LodImporter:
         meshObj = bpy.data.objects.new(name=fshpMesh.name, object_data=fshpMesh)
         mdata   = meshObj.data
 
-        # make split normals
-        normals = self._vertexNormals(n0)[:len(mdata.vertices)].tolist()
-
-        mdata.normals_split_custom_set_from_vertices(normals)
+        # Custom split normals from `_n0`, so shading matches the game.
+        # Blender applies them to flat faces too, so leave them out when
+        # the user asked for flat shading.
+        if self.parent.operator.smooth_faces:
+            normals = self._vertexNormals(n0)[:len(mdata.vertices)].tolist()
+            mdata.normals_split_custom_set_from_vertices(normals)
 
         self.parent.lodCollection(self.lodIdx).objects.link(meshObj)
 
@@ -295,6 +309,68 @@ class LodImporter:
             uv_layer = mdata.uv_layers.new(name=attr)
             uv_layer.data.foreach_set('uv', uv.ravel())
             idx += 1
+
+
+    def _addColors(self):
+        """Add vertex colors (`_c0`, `_c1`...) as color attributes.
+
+        They are per vertex, so POINT domain. FLOAT_COLOR keeps the values
+        exactly as the game stores them: BotW also puts shader data in
+        vertex colors (half floats beyond 1, signed values), which
+        BYTE_COLOR would clamp and treat as sRGB. `_c0` becomes the active
+        and render color.
+        """
+        mdata = self.meshObj.data
+        nV = len(mdata.vertices)
+        first = None
+        idx = 0
+        while True:
+            name = '_c%d' % idx
+            data = self.attrBuffers.get(name)
+            if data is None:
+                break
+            rgba = attrdecode.rgba(self.attrFormats[name], data)[:nV]
+            bad = ~np.isfinite(rgba)
+            if bad.any():
+                rgba[bad] = 0
+            attr = mdata.color_attributes.new(name, 'FLOAT_COLOR', 'POINT')
+            attr.data.foreach_set('color', rgba.ravel())
+            if first is None:
+                first = attr
+            idx += 1
+        if first is not None:
+            mdata.color_attributes.active_color_name = first.name
+            mdata.attributes.default_color_name = first.name
+
+
+    def _addTangents(self):
+        """Add tangents / bitangents (`_t0`, `_b0`) as generic attributes.
+
+        Blender computes its own tangents from the UVs for shading, so
+        these are only kept as data (for baking, exporting or custom
+        shaders): `_t0` / `_b0` are FLOAT_VECTOR attributes with XYZ
+        rotated into Blender space like the normals, and `_t0_w` / `_b0_w`
+        FLOAT attributes with the fourth component (the handedness sign,
+        +-1) when the format has one.
+        """
+        mdata = self.meshObj.data
+        nV = len(mdata.vertices)
+        for name in ('_t0', '_t1', '_b0', '_b1'):
+            data = self.attrBuffers.get(name)
+            if data is None:
+                continue
+            vals = attrdecode.to_float(self.attrFormats[name], data)[:nV]
+            if vals.shape[1] < 3:
+                log.warning("%s: attribute %s has %d component(s), skipped",
+                    self.lodName, name, vals.shape[1])
+                continue
+            xyz = np.nan_to_num(self._rotateDirections(vals)).astype(np.float32)
+            attr = mdata.attributes.new(name, 'FLOAT_VECTOR', 'POINT')
+            attr.data.foreach_set('vector', xyz.ravel())
+            if vals.shape[1] >= 4:
+                w = np.nan_to_num(vals[:, 3]).astype(np.float32)
+                attr = mdata.attributes.new(name + '_w', 'FLOAT', 'POINT')
+                attr.data.foreach_set('value', w)
 
 
     def _addVertexWeights(self):
