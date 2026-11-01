@@ -57,7 +57,8 @@ $BLENDER -b --factory-startup --python tools/import_test.py -- \
 ```
 
 Each line of output is one model: status, time, meshes, vertices, decoded
-images / total images, UVs that are NaN or far outside 0–1, and the number of
+images / total images, UVs that are NaN/infinite or beyond ±4096 (tiled
+surfaces can legitimately go into the hundreds), and the number of
 log warnings and errors. `report.json` has the details per mesh, image and
 material; `renders/` has one Workbench render per model.
 

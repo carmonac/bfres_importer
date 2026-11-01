@@ -65,6 +65,11 @@ def ensure_addon():
 
 # ---------------------------------------------------------------- inputs
 
+# Tiled surfaces legitimately use UVs in the hundreds (BotW walls go past
+# 170), so only flag values no texture mapping would produce, such as raw
+# integer UVs that were never normalized.
+UV_LIMIT = 4096.0
+
 MODEL_EXTS = (".sbfres", ".bfres", ".fres", ".szs", ".zs")
 
 
@@ -121,9 +126,9 @@ def mesh_stats(ob):
         uv_total += n
         for i in range(0, len(buf), 2):
             u, v = buf[i], buf[i + 1]
-            if math.isnan(u) or math.isnan(v):
+            if not (math.isfinite(u) and math.isfinite(v)):
                 uv_nan += 1
-            elif not (-8.0 <= u <= 8.0 and -8.0 <= v <= 8.0):
+            elif not (-UV_LIMIT <= u <= UV_LIMIT and -UV_LIMIT <= v <= UV_LIMIT):
                 uv_out += 1
     corners = [ob.matrix_world @ mathutils.Vector(c) for c in ob.bound_box]
     lo = [min(c[i] for c in corners) for i in range(3)]

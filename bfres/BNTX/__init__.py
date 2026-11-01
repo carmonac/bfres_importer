@@ -8,6 +8,8 @@ from ..Common import StringTable
 from .NX import NX
 from .BRTI import BRTI
 
+KNOWN_VERSIONS = (0x00040000, 0x400C)
+
 class Header(BinaryStruct):
     """BNTX header."""
     magic  = b'BNTX'
@@ -47,7 +49,8 @@ class BNTX:
             raise ValueError("Invalid byte order 0x%04X in BNTX header" %
                 self.header['byte_order'])
 
-        if self.header['version'] != 0x400C:
+        # 0x00040000 (4.0.0) is what Breath of the Wild uses.
+        if self.header['version'] not in KNOWN_VERSIONS:
             log.warning("Unknown BNTX version 0x%04X",
                 self.header['version'])
 
