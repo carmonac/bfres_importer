@@ -488,6 +488,12 @@ class FMAT(FresObject):
                 assign['shader_refl'])
             self.shader_assign.update(shaderrefl)
             self.header.update(shaderrefl)
+        else:
+            # BFRES 5.x names these fields without the "_offs" suffix used
+            # by the v10 shader reflection; normalize so the code below
+            # works for both versions.
+            assign['tex_attr_dict_offs'] = assign['tex_attr_dict']
+            assign['shader_option_dict_offs'] = assign['shader_option_dict']
 
         self.vtxAttrs = []
         for i in range(assign['num_vtx_attrs']):
