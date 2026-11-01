@@ -7,7 +7,9 @@ from ..BinaryFile import BinaryFile
 from ..Common import StringTable
 from enum import IntEnum
 from .pixelfmt import TextureFormat
-from .pixelfmt.swizzle import deswizzle, DIV_ROUND_UP, pow2_round_up
+from .pixelfmt.swizzle import deswizzle, surface_layout, DIV_ROUND_UP
+from .pixelfmt import channels as _channels
+import numpy as np
 from .pixelfmt.formatinfo import formats, bpps, blk_dims
 
 class Header(BinaryStruct):
@@ -58,12 +60,16 @@ class BRTI:
         Blue  = 4
         Alpha = 5
 
-    class TextureType(IntEnum):
-        Image1D = 0
-        Image2D = 1
-        Image3D = 2
-        Cube    = 3
-        CubeFar = 8
+    class TextureType(IntEnum):  # nn::gfx ImageDimension
+        Image1D        = 0
+        Image2D        = 1
+        Image3D        = 2
+        Cube           = 3
+        Image1DArray   = 4
+        Image2DArray   = 5
+        Image2DMS      = 6
+        Image2DMSArray = 7
+        CubeArray      = 8
 
     class TextureDataType(IntEnum):
         UNorm  = 1
@@ -76,7 +82,7 @@ class BRTI:
 
     def __init__(self):
         self.file       = None
-        self.mipOffsets = []
+        self.mipOffsets = []   # from the first level, as stored in the file
 
 
     def dump(self):
@@ -132,24 +138,30 @@ class BRTI:
         self.height          = self.header['height']
         self.tile_mode       = self.header['tile_mode']
         self.channel_types   = self.header['channel_types']
+        # e.g. 'RRRR' for a BC4 texture the shader reads as R in all four
+        self.channelSelectors = _channels.to_string(self.channel_types)
 
         self.fmt_id          = self.format_.id
-        self.bpp             = bpps[self.fmt_id]
+        self.bpp             = bpps.get(self.fmt_id, self.format_.bytesPerPixel)
 
         if (self.fmt_id) in blk_dims:
             self.blkWidth, self.blkHeight = blk_dims[self.fmt_id]
         else:
             self.blkWidth, self.blkHeight = 1, 1
         self.blockHeightLog2 = self.header['texture_layout'] & 7
+        self.mipCount   = max(1, self.header['mipmap_cnt'])
+        self.layerCount = max(1, self.header['array_cnt'])  # cube: 6 faces
+        self.depth      = max(1, self.header['depth'])
+        self.textureType = self.header['tex_type']
 
         log.debug("Reading texture %s (%s)", self.name, type(self.format_).__name__)
 
         self._readMipmaps()
-        self._readData()
         # a texture that fails to decode must not take the whole BNTX
         # (and the model's other textures) down with it
         self.decodeError = None
         try:
+            self._readData()
             self.pixels = self.format_.decompress(self)
         except Exception as ex:
             log.error("Could not decode texture '%s' (%s %dx%d): %s",
@@ -157,35 +169,95 @@ class BRTI:
                 self.height, ex)
             self.pixels = None
             self.decodeError = str(ex)
+        if self.layerCount > 1 or self.depth > 1:
+            log.info("Texture '%s' has %d layers, depth %d (type %d): "
+                "the images are made from layer 0", self.name,
+                self.layerCount, self.depth, self.textureType)
         return self
 
 
     def _readMipmaps(self):
-        """Read the mipmap images."""
-        for i in range(self.header['mipmap_cnt']):
-            offs  = self.header['ptrs_offset'] + (i*8)
-            entry = self.file.read('I', offs) #- base
-            self.mipOffsets.append(entry)
+        """Read the mipmap offsets (relative to the first level)."""
+        ptrs = [self.file.read('Q', self.header['ptrs_offset'] + i * 8)
+                for i in range(self.mipCount)]
+        self.mipOffsets = [p - ptrs[0] for p in ptrs]
 
 
     def _readData(self):
-        """Read the raw image data."""
+        """Read the raw image data and deswizzle level 0 of layer 0."""
         base = self.file.read('Q', self.header['ptrs_offset'])
         self.data = self.file.read(self.header['data_len'], base)
+        if self.depth > 1:
+            raise NotImplementedError("3D textures (depth %d) are not supported" % self.depth)
 
-        linesPerBlockHeight = (1 << self.blockHeightLog2) * 8
-        blockHeightShift = 0
-        mipOffset = self.mipOffsets[0]
+        self.levels, self.layerSize = surface_layout(self.width, self.height,
+            self.blkWidth, self.blkHeight, self.bpp, self.tile_mode,
+            self.blockHeightLog2, self.mipCount, self.layerCount)
+        computed = [lv['offset'] for lv in self.levels]
+        if computed != self.mipOffsets:
+            # never seen in Breath of the Wild: trust the file's offsets
+            log.warning("Texture '%s': mip offsets %s, expected %s",
+                self.name, self.mipOffsets, computed)
+            for lv, offs in zip(self.levels, self.mipOffsets):
+                lv['offset'] = offs
+        if self.layerCount > 1:
+            stride = self.header['data_len'] // self.layerCount
+            if stride != self.layerSize:
+                log.warning("Texture '%s': layer size %d, expected %d",
+                    self.name, stride, self.layerSize)
+                self.layerSize = stride
 
-        size = DIV_ROUND_UP(self.width, self.blkWidth) * DIV_ROUND_UP(self.height, self.blkHeight) * self.bpp
+        self.mipData = self.levelData(0, 0)
 
-        if pow2_round_up(DIV_ROUND_UP(self.height, self.blkHeight)) < linesPerBlockHeight:
-            blockHeightShift += 1
 
-        result = deswizzle(
-            self.width, self.height, self.blkWidth, self.blkHeight, self.bpp, self.tile_mode,
-            max(0, self.blockHeightLog2 - blockHeightShift), self.data,
-        )
+    def levelData(self, level=0, layer=0):
+        """Deswizzled (linear) data of one mip level of one array layer."""
+        lv = self.levels[level]
+        start = layer * self.layerSize + lv['offset']
+        size = (DIV_ROUND_UP(lv['width'], self.blkWidth) *
+                DIV_ROUND_UP(lv['height'], self.blkHeight) * self.bpp)
+        result = deswizzle(lv['width'], lv['height'], self.blkWidth,
+            self.blkHeight, self.bpp, self.tile_mode, lv['blockHeightLog2'],
+            self.data[start:start + lv['size']])
+        return result[:size]
 
-        self.mipData = result[:size]
-            
+
+    def decodeLevel(self, level=0, layer=0):
+        """Decoded data of one level/layer, in the format's own
+        decompress() output (what `pixels` holds for level 0, layer 0)."""
+        if level == 0 and layer == 0:
+            if self.pixels is None:
+                raise ValueError(self.decodeError or "texture did not decode")
+            return self.pixels
+        return self.format_.decompress(_Level(self, level, layer))
+
+
+    def rgba(self, level=0, layer=0, selectors=None):
+        """Float32 RGBA pixels of a level/layer, shape (height, width, 4),
+        top row first (as stored; Blender wants them flipped).
+
+        `selectors`: apply the BRTI channel selectors (see
+        pixelfmt/channels.py); None follows `channels.mode` ('off' by
+        default: the decoders' own output, as the importer always had).
+        """
+        lv = self.levels[level]
+        px = np.asarray(self.format_.decodePixels(self.decodeLevel(level, layer)),
+                        np.float32)
+        if selectors is None:
+            selectors = _channels.mode == 'on'
+        if selectors and not _channels.is_identity(self.channel_types):
+            px = _channels.apply(px, self.channel_types,
+                                 getattr(self.format_, 'channels', 4))
+        return px.reshape(lv['height'], lv['width'], 4)
+
+
+class _Level:
+    """What a format's decompress() reads, for another level or layer."""
+
+    def __init__(self, tex, level, layer):
+        lv = tex.levels[level]
+        self.name    = '%s[level %d, layer %d]' % (tex.name, level, layer)
+        self.header  = tex.header
+        self.width   = lv['width']
+        self.height  = lv['height']
+        self.mipData = tex.levelData(level, layer)

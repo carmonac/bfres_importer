@@ -29,6 +29,14 @@ images (no game data):
    and reports the largest pixel difference and the decode times::
 
        python3 tools/test_textures.py corpus ~/Documents/bfres_corpus/botw
+
+4. ``levels`` (any Python with numpy) decodes every mip level and array
+   layer of every texture in a folder and compares each level with a 2x2
+   box reduction of the one above it: a level deswizzled with the wrong
+   block height comes out scrambled, far from the reduction (mean
+   difference > 0.1)::
+
+       python3 tools/test_textures.py levels ~/Documents/bfres_corpus/botw
 """
 import os
 import struct
@@ -97,25 +105,38 @@ def bc6h_encode(rgb, signed):
     return bytes(out)
 
 
-def swizzle(data, width, height, bw, bh, bpp, layout):
-    """Linear blocks -> Tegra block-linear surface, the way BRTI reads it."""
+def swizzle(data, width, height, bw, bh, bpp, block_height_log2):
+    """Linear blocks of one level -> Tegra block-linear, the way BRTI reads it."""
     import numpy as np
     sys.path.insert(0, ROOT)
-    from bfres.BNTX.pixelfmt.swizzle import (getAddrBlockLinear, DIV_ROUND_UP,
-                                             pow2_round_up, round_up)
+    from bfres.BNTX.pixelfmt.swizzle import getAddrBlockLinear, DIV_ROUND_UP, mip_size
     ew, eh = DIV_ROUND_UP(width, bw), DIV_ROUND_UP(height, bh)
-    log2 = layout & 7
-    if pow2_round_up(eh) < (1 << log2) * 8:
-        log2 = max(0, log2 - 1)
-    block_height = 1 << log2
-    pitch = round_up(ew * bpp, 64)
-    size = pitch * round_up(eh, block_height * 8)
+    block_height = 1 << block_height_log2
+    size = mip_size(ew, eh, bpp, 0, block_height)
     y, x = np.meshgrid(np.arange(eh, dtype=np.int64), np.arange(ew, dtype=np.int64), indexing='ij')
     pos = getAddrBlockLinear(x, y, ew, bpp, 0, block_height)
     src = np.frombuffer(data, np.uint8)[:ew * eh * bpp].reshape(eh, ew, bpp)
     surf = np.zeros(size, np.uint8)
     surf[pos[..., None] + np.arange(bpp)] = src
     return surf.tobytes()
+
+
+def swizzle_surface(layers, width, height, bw, bh, bpp, layout):
+    """layers[layer][level] linear data -> (surface, level offsets), laid
+    out like the console's driver does (bfres/BNTX/pixelfmt/swizzle.py
+    surface_layout: per-level block height, aligned array layers)."""
+    sys.path.insert(0, ROOT)
+    from bfres.BNTX.pixelfmt.swizzle import surface_layout
+    levels, layer_size = surface_layout(width, height, bw, bh, bpp, 0, layout & 7,
+                                        len(layers[0]), len(layers))
+    out = bytearray(layer_size * len(layers) if len(layers) > 1 else
+                    levels[-1]['offset'] + levels[-1]['size'])
+    for k, layer in enumerate(layers):
+        for lv, data in zip(levels, layer):
+            surf = swizzle(data, lv['width'], lv['height'], bw, bh, bpp, lv['blockHeightLog2'])
+            at = k * layer_size + lv['offset']
+            out[at:at + len(surf)] = surf
+    return bytes(out), [lv['offset'] for lv in levels]
 
 
 def build_textures():
@@ -196,7 +217,16 @@ def build_textures():
 
 
 def write_bntx(path, texs):
-    """Minimal BNTX: what bfres/BNTX reads, nothing more."""
+    """Minimal BNTX: what bfres/BNTX reads, nothing more.
+
+    Each texture is (name, fmt_type, dtype, w, h, (bw, bh), data, ref,
+    compare[, opts]); `opts` may give 'levels' (list of array layers, each a
+    list of linear mip levels, replacing `data`), 'bpp', 'layout' (block
+    height log2, default: the driver's choice), 'sel' (four channel
+    selectors, default RGBA) and 'img_dim' (default 1 = 2D; 3 = cube).
+    """
+    sys.path.insert(0, ROOT)
+    from bfres.BNTX.pixelfmt.swizzle import block_height_mip0, DIV_ROUND_UP
     names = [b'synth'] + [t[0].encode() for t in texs]
     strtab = bytearray()
     str_offs = []
@@ -213,20 +243,36 @@ def write_bntx(path, texs):
     head_end = STR_AT + len(strhdr) + len(strtab)
     table_at = (head_end + 7) & ~7
     brti_at = table_at + 8 * len(texs)
-    BRTI_SIZE = 0x78 + 8          # header + one mip pointer
-    data_at = (brti_at + BRTI_SIZE * len(texs) + 0x1FF) & ~0x1FF
+
+    surfs, sizes = [], []
+    for t in texs:
+        name, ftype, dtype, w, h, (bw, bh), data, _ref, _cmp = t[:9]
+        opts = t[9] if len(t) > 9 else {}
+        bpp = opts.get('bpp', 16 if ftype not in (0x1a, 0x1d) else 8)
+        layers = opts.get('levels', [[data]])
+        layout = opts.get('layout', block_height_mip0(DIV_ROUND_UP(h, bh)).bit_length() - 1)
+        surf, offs = swizzle_surface(layers, w, h, bw, bh, bpp, layout)
+        surfs.append((surf, offs, layout, len(layers), opts))
+        sizes.append(0x78 + 8 * len(offs))
+    brti_offs = []
+    at = brti_at
+    for size in sizes:
+        brti_offs.append(at)
+        at += size
+    data_at = (at + 0x1FF) & ~0x1FF
 
     blobs, brtis, d = [], [], data_at
-    for k, (name, ftype, dtype, w, h, (bw, bh), data, _ref, _cmp) in enumerate(texs):
-        layout = 4
-        surf = swizzle(data, w, h, bw, bh, 16 if ftype not in (0x1a, 0x1d) else 8, layout)
-        at = brti_at + k * BRTI_SIZE
+    for k, t in enumerate(texs):
+        name, ftype, dtype, w, h, (bw, bh), data, _ref, _cmp = t[:9]
+        surf, offs, layout, nlayers, opts = surfs[k]
+        sel = opts.get('sel', (2, 3, 4, 5))
+        at = brti_offs[k]
         hdr = struct.pack('<4sIQBBHHHHHBB2xIiiiIII20xII4BiI4xQQ',
-            b'BRTI', BRTI_SIZE, BRTI_SIZE, 1, 2, 0, 0, 1, 1, 0, dtype, ftype,
-            0x20, w, h, 1, 1, layout, 0x10007, len(surf), 0x200,
-            2, 3, 4, 5, 1, str_offs[k + 1], 0x20, at + 0x78)
+            b'BRTI', sizes[k], sizes[k], 1, 2, 0, 0, len(offs), 1, 0, dtype, ftype,
+            0x20, w, h, 1, nlayers, layout, 0x10007, len(surf), 0x200,
+            *sel, opts.get('img_dim', 1), str_offs[k + 1], 0x20, at + 0x78)
         assert len(hdr) == 0x78
-        brtis.append(hdr + struct.pack('<Q', d))
+        brtis.append(hdr + b''.join(struct.pack('<Q', d + o) for o in offs))
         blobs.append((d, surf))
         d = (d + len(surf) + 0x1FF) & ~0x1FF
     size = d
@@ -236,10 +282,12 @@ def write_bntx(path, texs):
     out[0x20:0x44] = struct.pack('<4sIQQQI', b'NX  ', len(texs), table_at, data_at, 0, 0)
     out[STR_AT:head_end] = strhdr + strtab
     for k in range(len(texs)):
-        out[table_at + 8 * k:table_at + 8 * k + 8] = struct.pack('<Q', brti_at + k * BRTI_SIZE)
-        out[brti_at + k * BRTI_SIZE:brti_at + (k + 1) * BRTI_SIZE] = brtis[k]
+        out[table_at + 8 * k:table_at + 8 * k + 8] = struct.pack('<Q', brti_offs[k])
+        out[brti_offs[k]:brti_offs[k] + sizes[k]] = brtis[k]
     for at, surf in blobs:
         out[at:at + len(surf)] = surf
+    if path is None:
+        return bytes(out)
     with open(path, 'wb') as f:
         f.write(out)
 
@@ -388,9 +436,74 @@ def corpus(folder):
     return 1 if fails else 0
 
 
+# ---------------------------------------------------------------- levels
+
+def _reduce(px, w, h):
+    """2x2 box reduction of (H, W, 4) pixels to (h, w, 4)."""
+    import numpy as np
+    H, W = px.shape[:2]
+    if H < 2 * h:
+        px = np.repeat(px, 2, 0)
+    if W < 2 * w:
+        px = np.repeat(px, 2, 1)
+    px = px[:2 * h, :2 * w]
+    return px.reshape(h, 2, w, 2, 4).mean((1, 3))
+
+
+def levels(folder, limit=0.1):
+    import io
+    import logging
+    import numpy as np
+    sys.path.insert(0, ROOT)
+    logging.basicConfig(level=logging.ERROR)
+    from bfres import YAZ0
+    from bfres.BinaryFile import BinaryFile
+    from bfres.BNTX import BNTX
+    ntex = nlev = fails = bad = 0
+    worst = (0.0, None)
+    for fn in sorted(os.listdir(folder)):
+        if not fn.endswith(('.sbfres', '.bfres', '.bntx')):
+            continue
+        with open(os.path.join(folder, fn), 'rb') as f:
+            data = f.read()
+        if data[:4] in (b'Yaz0', b'Yaz1'):
+            data = YAZ0.decompress(data)
+        for blob in _bntx_blobs(data):
+            bio = io.BytesIO(blob)
+            bio.name = fn
+            bntx = BNTX(BinaryFile(bio))
+            bntx.decode()
+            for tex in bntx.textures:
+                ntex += 1
+                hdr = getattr(tex.format_, 'hdr', False)
+                for layer in range(tex.layerCount):
+                    prev = None
+                    for m in range(tex.mipCount):
+                        nlev += 1
+                        try:
+                            px = tex.rgba(m, layer)
+                        except Exception as ex:
+                            fails += 1
+                            print("FAIL %s %s level %d layer %d: %s" % (fn, tex.name, m, layer, ex))
+                            break
+                        if prev is not None and not hdr:
+                            d = float(np.abs(_reduce(prev, px.shape[1], px.shape[0]) - px).mean())
+                            if d > worst[0]:
+                                worst = (d, "%s %s level %d layer %d" % (fn, tex.name, m, layer))
+                            if d > limit:
+                                bad += 1
+                                print("SUSPECT %s %s level %d layer %d (%dx%d): mean diff %.3f"
+                                      % (fn, tex.name, m, layer, px.shape[1], px.shape[0], d))
+                        prev = px
+    print("%d textures, %d levels, %d failures, %d suspect levels; largest mean "
+          "difference to the reduced level above: %.4f (%s)" % (ntex, nlev, fails, bad,
+          worst[0], worst[1]))
+    return 1 if fails or bad else 0
+
+
 def main():
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else sys.argv[1:]
-    if len(argv) != 2 or argv[0] not in ('make', 'check', 'corpus'):
+    if len(argv) != 2 or argv[0] not in ('make', 'check', 'corpus', 'levels'):
         print(__doc__)
         return 2
     if argv[0] == 'make':
@@ -398,6 +511,8 @@ def main():
         return 0
     if argv[0] == 'corpus':
         return corpus(os.path.expanduser(argv[1]))
+    if argv[0] == 'levels':
+        return levels(os.path.expanduser(argv[1]))
     return 1 if check(argv[1]) else 0
 
 

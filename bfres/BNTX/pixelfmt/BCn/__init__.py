@@ -89,6 +89,7 @@ class BC3(_Block):
 class BC4(_Block):
     id = 0x1d
     blockBytes = 8
+    channels = 1
 
     def decompress(self, tex):
         data = _data(tex, 8)
@@ -107,6 +108,7 @@ class BC4(_Block):
 
 class BC5(_Block):
     id = 0x1e
+    channels = 2
 
     def decompress(self, tex):
         data = _data(tex, 16)
@@ -135,6 +137,7 @@ class BC6(_Block):
     decoder clamps it to 8 bits."""
     id = 0x1f
     hdr = True
+    channels = 3
     depth = 16
 
     def decompress(self, tex):

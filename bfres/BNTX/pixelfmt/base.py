@@ -53,14 +53,16 @@ class TextureFormat:
     id = None
     bytesPerPixel = 4
     depth = 8
+    channels = 4   # components the format stores (see channels.py)
 
     @staticmethod
     def get(id):
         try:
             return fmts[id]
         except KeyError:
+            # don't fail the whole BNTX: this texture alone fails to decode
             log.error("Unsupported texture format 0x%02X", id)
-            raise TypeError("Unsupported texure format")
+            return type('Unsupported_0x%02X' % id, (Unsupported,), {'id': id})
 
 
     def decompress(self, tex):
@@ -80,3 +82,10 @@ class TextureFormat:
     def __str__(self):
         return "<TextureFormat '%s' at 0x%x>" % (
             type(self).__name__, id(self))
+
+
+class Unsupported(TextureFormat):
+    """A format this add-on cannot decode (made by TextureFormat.get)."""
+
+    def decompress(self, tex):
+        raise TypeError("Unsupported texture format 0x%02X" % self.id)

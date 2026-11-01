@@ -165,7 +165,7 @@ def summarize(recs, out=sys.stdout):
     table("tile mode", collections.Counter(r['tile'] for r in recs))
     table("mip count", collections.Counter(r['mips'] for r in recs), 20)
     table("channel selectors (format: RGBA source)", collections.Counter(
-        '%-10s %s' % (r['format'].split('_')[0], r['sel']) for r in recs))
+        '%-18s %s' % (r['format'].rsplit('_', 1)[0], r['sel']) for r in recs))
     table("level-0 block height log2 (header == driver rule)", collections.Counter(
         '%d %s' % (r['bh_log2'], 'same' if r.get('bh0_driver') == r['bh_log2'] else
                    'driver %s' % r.get('bh0_driver')) for r in recs))
