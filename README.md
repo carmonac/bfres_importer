@@ -17,6 +17,8 @@ This addon is currently in heavy development and large portions of it do not wor
     - [x] Textures
         - BC1-BC7 (BC6H as a float/HDR image), all ASTC block sizes, and the uncompressed formats BotW uses
         - Decoded with the bundled native decoder [texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT license, wheels in `wheels/`); without it, built-in Python decoders are used (everything but ASTC)
+        - Packed in the `.blend` (default) or saved as PNG (EXR for HDR) in a folder (`<model>_textures` next to the file) and referenced from there
+        - Identical textures reuse the image already in the file (e.g. a model imported twice); a different texture with a name already taken is renamed `<model>:<texture>`
     - [ ] Materials
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
         - Does not yet read material attributes or shader settings
@@ -61,7 +63,7 @@ Very much in development and may be full of bugs and rough corners.
 # What works:
 - Importing models, with their skeletons and textures, from `.bfres` and `.sbfres` files (at least `Animal_Fox` works)
     - Includes cases where textures are in a separate `.Tex.sbfres` file in the same directory
-    - Textures are embedded in the `.blend` file
+    - Textures are embedded in the `.blend` file, or saved to a folder
     - Each LOD (level of detail) model is imported as a separate object; LODs other than the first are kept in hidden collections.
     - Materials' render/shader/material parameters are stored as Blender custom properties on the material objects.
     - Text files in the FRES are embedded into the blend file.
