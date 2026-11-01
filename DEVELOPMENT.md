@@ -199,6 +199,7 @@ for the pixel shader (`gsys_assign_gbuffer` is the deferred pass that
 writes albedo/normal/emission). In the IR, the material block is the
 `fp_c7`-like buffer bound to the program's `gsys_material` location (index
 = byte offset / 16), textures are `fp_t_tcb_<hex>` with register
-`(hex - 8) / 2` = the program's sampler location. Parameters that keep
-their default value (1.0) in every material using a program are folded
-into the code, so a missing load means "1".
+`(hex - 8) / 2` = the program's sampler location. Material parameters
+that have the same value in every material using a program are folded into
+the code (Chuchu's `const_value1 = 0`, the 1.0 defaults of the moss
+materials), so an argument without a load is a constant, not an unused one.
