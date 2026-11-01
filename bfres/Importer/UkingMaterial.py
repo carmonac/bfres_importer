@@ -748,8 +748,8 @@ class NodeCombiner:
             r = op('MULTIPLY', op('ADD', op('MULTIPLY', v[0], v[1], L + ': A B'), v[2],
                                   L + ': A B + C'), v[3], L + ': (A B + C) D')
         elif t == 28:
-            r = op('MULTIPLY', op('POWER', v[0], v[1], L + ': pow(A, B)'), v[2],
-                   L + ': pow(A, B) C')
+            r = op('ADD', op('MULTIPLY', op('POWER', v[0], v[1], L + ': pow(A, B)'), v[2],
+                             L + ': pow(A, B) C'), v[3], L + ': pow(A, B) C + D')
         else:
             raise combiner.Unsupported('calc type %d' % t)
         if e.clamp:

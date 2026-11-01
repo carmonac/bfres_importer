@@ -61,7 +61,7 @@ CALC = {
     12: ('ABCD', 'mix(A, B, C) * D'),
     15: ('ABCD', 'mix(A, B, C) + D'),
     21: ('ABCD', '(A * B + C) * D'),
-    28: ('ABC', 'pow(A, B) * C'),
+    28: ('ABCD', 'pow(A, B) * C + D'),
 }
 
 
@@ -268,7 +268,7 @@ OPS = {
     12: lambda A, B, C, D: _mix(A, B, C) * D,
     15: lambda A, B, C, D: _mix(A, B, C) + D,
     21: lambda A, B, C, D: (A * B + C) * D,
-    28: lambda A, B, C: (A ** B if A > 0 else 0.0) * C,
+    28: lambda A, B, C, D: (A ** B if A > 0 else 0.0) * C + D,
 }
 
 

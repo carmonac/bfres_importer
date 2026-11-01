@@ -138,7 +138,7 @@ class CombinerTest(unittest.TestCase):
         want = {1: A + B, 2: A * B, 4: A * (1 - Cc) + B * Cc, 5: (A + B) * Cc,
                 6: Cc * D - A * B, 7: A ** B, 8: A * B + Cc, 9: A * B * Cc,
                 11: A * B * Cc * D, 12: (A * (1 - Cc) + B * Cc) * D,
-                15: A * (1 - Cc) + B * Cc + D, 21: (A * B + Cc) * D, 28: A ** B * Cc}
+                15: A * (1 - Cc) + B * Cc + D, 21: (A * B + Cc) * D, 28: A ** B * Cc + D}
         for t, v in want.items():
             o = {}
             stage(o, 0, t, [(104, 0), (105, 0), (106, 0), (107, 0)])
