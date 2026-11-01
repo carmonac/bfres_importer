@@ -16,6 +16,19 @@ class MaterialImporter:
         self.context  = parent.context
 
 
+    def _hasVertexColor(self, fmat):
+        """Whether every shape using `fmat` has vertex colors (_c0)."""
+        try:
+            idx = self.fmdl.fmats.index(fmat)
+            shapes = [s for s in self.fmdl.fshps if s.header['fmat_idx'] == idx]
+            return bool(shapes) and all(
+                any(a.name == '_c0' for a in self.fmdl.fvtxs[s.header['fvtx_idx']].attrs)
+                for s in shapes)
+        except Exception:
+            log.debug("Could not check vertex colors of %s", fmat.name, exc_info=True)
+            return False
+
+
     def importMaterial(self, fmat):
         """Import specified material."""
         mat = bpy.data.materials.new(name=fmat.name)
@@ -38,7 +51,8 @@ class MaterialImporter:
                     log.info("Texture %s missing", info['textureName'])
                     continue
                 textures.append((sampler, info['textureName'], image))
-            UkingMaterial.UkingMaterialBuilder(fmat, mat, self.operator).build(textures)
+            UkingMaterial.UkingMaterialBuilder(fmat, mat, self.operator,
+                has_vertex_color=self._hasVertexColor(fmat)).build(textures)
             return mat
 
         mat_wrap = PrincipledBSDFWrapper(mat, is_readonly=False)
