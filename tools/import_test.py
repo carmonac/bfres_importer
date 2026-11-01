@@ -156,7 +156,7 @@ def image_stats(img):
 
 def material_stats(mat):
     tex = []
-    if mat.use_nodes and mat.node_tree:
+    if mat.node_tree:
         for n in mat.node_tree.nodes:
             if n.type == "TEX_IMAGE":
                 tex.append(n.image.name if n.image else None)
@@ -269,7 +269,9 @@ def summary_line(e):
     t = e["totals"]
     err = ""
     if e["error"]:
-        err = e["error"].strip().splitlines()[-1][:70]
+        lines = [l for l in e["error"].strip().splitlines()
+                 if l.strip() and not l.startswith(("Location:", "  "))]
+        err = (lines[-1] if lines else "")[:70]
     return "%-40s %-6s %7.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %5d  log %3d  %s" % (
         e["file"][:40], e["status"], e["seconds"], t["meshes"], t["verts"],
         t["images"] - t["images_without_data"], t["images"],
