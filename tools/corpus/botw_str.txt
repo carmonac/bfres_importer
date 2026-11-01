@@ -1,0 +1,18 @@
+# Breath of the Wild models with non-ASCII (Japanese, UTF-8) strings in the
+# FRES string table (issue #34; found with tools/scan_strings.py). Before
+# the fix they failed with UnicodeDecodeError ('shift_jis').
+# Extract to a separate folder:
+#   extract_corpus.py <romfs> ~/Documents/bfres_corpus/botw_str --list tools/corpus/botw_str.txt
+#
+# Only 5 files in the whole RomFS have such strings, all UTF-8: these two,
+# their -01 siblings and Enemy_SiteBoss_Spear (already in botw_tex).
+# The split models (-01..-03) have no Tex file of their own: the shared
+# <name>_Far.Tex.sbfres is copied too, but the importer does not link it.
+
+# Material name "カカリコ村の滝（透明+水中フォグ）" (Kakariko waterfall).
+FldObj_WaterFall_A_Far-03.sbfres
+FldObj_WaterFall_A_Far.Tex.sbfres
+
+# Material name "水平部分が水面の滝" (waterfall with a horizontal surface).
+FldObj_WaterFallAkkare_A_Far-03.sbfres
+FldObj_WaterFallAkkare_A_Far.Tex.sbfres
