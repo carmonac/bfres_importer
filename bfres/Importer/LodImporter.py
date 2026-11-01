@@ -66,6 +66,12 @@ class LodImporter:
                     buf.data, attr.buf_offs, buf.stride, nVtxs)
             except attrdecode.AttributeFormatError as ex:
                 raise MalformedFileError("Attribute '%s': %s" % (attr.name, ex))
+            vals = attrBuffers[attr.name]
+            if vals.dtype.kind == 'f':
+                bad = np.count_nonzero(~np.isfinite(vals))
+                if bad:
+                    log.warning("%s: attribute %s has %d non-finite value(s)",
+                        self.fshp.name, attr.name, bad)
         return attrBuffers
 
 
@@ -110,15 +116,16 @@ class LodImporter:
         nVtxs = int(self.lod.header['idx_cnt'] / 3)
         log.debug("LOD has %d vtxs, %d idxs", nVtxs, len(idxs))
 
-        # create a mesh and add faces to it
-        mesh = bmesh.new()
-        self._addVerticesToMesh(mesh, p0, n0)
-        self._createFaces(idxs, mesh)
-
-        # Write the bmesh data back to a new mesh.
-        fshpMesh = bpy.data.meshes.new(name=self.lodName)
-        mesh.to_mesh(fshpMesh)
-        mesh.free()
+        if self.lod.prim_fmt == 'triangle_list':
+            fshpMesh = self._buildTriangleMesh(p0, idxs)
+        else:
+            # rare primitive types: build through bmesh
+            mesh = bmesh.new()
+            self._addVerticesToMesh(mesh, p0, n0)
+            self._createFaces(idxs, mesh)
+            fshpMesh = bpy.data.meshes.new(name=self.lodName)
+            mesh.to_mesh(fshpMesh)
+            mesh.free()
         meshObj = bpy.data.objects.new(name=fshpMesh.name, object_data=fshpMesh)
         mdata   = meshObj.data
 
@@ -186,8 +193,50 @@ class LodImporter:
         return self._createFacesBasic(idxs, mesh, 3, 3)
 
 
-    def _addVerticesToMesh(self, mesh, vtxs, nrms):
-        """Add vertices (from `_p0` attribute) to a `bmesh`."""
+    def _buildTriangleMesh(self, p0, idxs):
+        """Create the mesh for a triangle list directly with foreach_set.
+
+        Produces the same result as adding the faces one by one through
+        bmesh: all vertices are kept (in order), and triangles bmesh would
+        reject -- degenerate ones, or a repeat of an earlier triangle's
+        three vertices in any order -- are dropped, keeping the first.
+        """
+        pos = self._vertexPositions(p0)
+        nV = len(pos)
+        idx = np.asarray(idxs, dtype=np.int64)
+        tris = idx[:len(idx) // 3 * 3].reshape(-1, 3)
+        if tris.size and (tris.min() < 0 or tris.max() >= nV):
+            log.error("LOD face index out of bounds (max %d, have %d vertices)",
+                tris.max(), nV)
+            raise MalformedFileError("LOD submesh faces are out of bounds")
+
+        degenerate = ((tris[:, 0] == tris[:, 1]) | (tris[:, 1] == tris[:, 2])
+                      | (tris[:, 0] == tris[:, 2]))
+        valid = np.flatnonzero(~degenerate)
+        _, first = np.unique(np.sort(tris[valid], axis=1), axis=0, return_index=True)
+        keep = valid[np.sort(first)]
+        skipped = len(tris) - len(keep)
+        if skipped:
+            log.warning("%s: skipped %d duplicate or degenerate face(s)",
+                self.lodName, skipped)
+        tris = tris[keep]
+
+        me = bpy.data.meshes.new(name=self.lodName)
+        me.vertices.add(nV)
+        me.vertices.foreach_set('co', pos.astype(np.float32).ravel())
+        me.loops.add(tris.size)
+        me.loops.foreach_set('vertex_index', tris.astype(np.int32).ravel())
+        me.polygons.add(len(tris))
+        me.polygons.foreach_set('loop_start',
+            np.arange(0, tris.size, 3, dtype=np.int32))
+        me.polygons.foreach_set('use_smooth',
+            np.full(len(tris), bool(self.parent.operator.smooth_faces)))
+        me.update(calc_edges=True)
+        return me
+
+
+    def _vertexPositions(self, vtxs):
+        """Vertex positions (from `_p0`) in Blender space, (n, 3)."""
         vtxs = np.asarray(vtxs, dtype=np.float64)
         if vtxs.shape[1] == 4:
             bad = np.count_nonzero(vtxs[:, 3] != 1)
@@ -202,7 +251,7 @@ class LodImporter:
         match self.fshp.header['vtx_skin_cnt']:
             case 0:
                 M = self.fmdl.skeleton.bones[self.fshp.header['single_bind']].matrix
-                pos = self._transform(pos, M)
+                return self._transform(pos, M)
             case 1:
                 i0 = self.attrBuffers['_i0'][:, 0]
                 out = np.empty_like(pos)
@@ -210,11 +259,14 @@ class LodImporter:
                     M = self.fmdl.skeleton.boneRigidMtxGroups[int(midx)][0].matrix
                     sel = i0 == midx
                     out[sel] = self._transform(pos[sel], M)
-                pos = out
+                return out
             case _:
-                pos = np.stack((pos[:, 0], -pos[:, 2], pos[:, 1]), axis=1)
+                return np.stack((pos[:, 0], -pos[:, 2], pos[:, 1]), axis=1)
 
-        for i, co in enumerate(pos.tolist()):
+
+    def _addVerticesToMesh(self, mesh, vtxs, nrms):
+        """Add vertices (from `_p0` attribute) to a `bmesh`."""
+        for i, co in enumerate(self._vertexPositions(vtxs).tolist()):
             vert = mesh.verts.new(co)
             vert.index = i
         mesh.verts.ensure_lookup_table()
@@ -283,35 +335,51 @@ class LodImporter:
             skin = self.fshp.header['vtx_skin_cnt']
             if skin == 1:
                 # i0 specifies the bone rigid matrix group.
-                for i, idx in enumerate(i0[:, 0].tolist()):
-                    groups[idx].add([i], 1.0, 'REPLACE')
+                bones = i0[:, 0].astype(np.int64)
+                vids = np.arange(len(bones))
+                wgts = np.ones(len(bones), dtype=np.float32)
             else:
                 # i0/i1 give up to 8 smooth matrix indices and w0/w1 how
                 # much each one weighs (already normalized to 0..1).
                 idxs = np.concatenate([a for a in (i0, self.attrBuffers.get('_i1')) if a is not None], axis=1)[:, :skin]
-                wgts = np.concatenate([a for a in (w0, self.attrBuffers.get('_w1')) if a is not None], axis=1)
-                if wgts.shape[1] < skin:
+                ws = np.concatenate([a for a in (w0, self.attrBuffers.get('_w1')) if a is not None], axis=1)
+                if ws.shape[1] < skin:
                     # the last weight is implied when it isn't stored
-                    rest = np.clip(1.0 - wgts.sum(axis=1, keepdims=True), 0, 1)
-                    wgts = np.concatenate((wgts, rest), axis=1)
-                wgts = wgts[:, :skin]
-                missing = set()
-                for i, (vidx, vw) in enumerate(zip(idxs.tolist(), wgts.tolist())):
-                    for idx, w in zip(vidx, vw):
-                        if w <= 0:
-                            continue
-                        grp = groups.get(idx)
-                        if grp is None:
-                            missing.add(idx)
-                            continue
-                        # ADD: the same bone may appear twice for a vertex
-                        grp.add([i], w, 'ADD')
-                if missing:
-                    log.warning("%s: weights reference unknown bone matrices %s",
-                        self.lodName, sorted(missing))
+                    rest = np.clip(1.0 - ws.sum(axis=1, keepdims=True), 0, 1)
+                    ws = np.concatenate((ws, rest), axis=1)
+                ws = ws[:, :skin]
+                vids = np.repeat(np.arange(len(idxs)), skin)
+                bones = idxs.astype(np.int64).ravel()
+                wgts = ws.astype(np.float32).ravel()
+                used = wgts > 0
+                vids, bones, wgts = vids[used], bones[used], wgts[used]
+                # a vertex may list the same bone twice: sum those weights
+                if len(bones):
+                    nb = int(bones.max()) + 1
+                    keys, inv = np.unique(vids * nb + bones, return_inverse=True)
+                    wgts = np.bincount(inv, weights=wgts).astype(np.float32)
+                    vids, bones = keys // nb, keys % nb
+            self._assignWeights(groups, vids, bones, wgts)
         else: 
             # no i0 or w0, mesh is parented to the bone it's on
             idx = self.fshp.header['single_bind']
             grp = self.meshObj.vertex_groups.new(name=self.fmdl.skeleton.bones[idx].name)
-            for i in range(0, len(self.attrBuffers['_p0'])):
-                grp.add([i], 1, 'REPLACE')
+            grp.add(list(range(len(self.attrBuffers['_p0']))), 1.0, 'REPLACE')
+
+
+    def _assignWeights(self, groups, vids, bones, wgts):
+        """Add (vertex, bone matrix index, weight) triples to the vertex
+        groups, one `add()` call per bone and distinct weight value."""
+        missing = []
+        for bone in np.unique(bones).tolist():
+            grp = groups.get(bone)
+            if grp is None:
+                missing.append(bone)
+                continue
+            sel = bones == bone
+            bv, bw = vids[sel], wgts[sel]
+            for w in np.unique(bw).tolist():
+                grp.add(bv[bw == w].tolist(), w, 'REPLACE')
+        if missing:
+            log.warning("%s: weights reference unknown bone matrices %s",
+                self.lodName, missing)
