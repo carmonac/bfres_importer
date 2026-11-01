@@ -188,9 +188,12 @@ class MaterialAnimationImporter:
                     # Every embedded node tree is called "Shader Nodetree",
                     # so the default slot (named after the ID) would be
                     # shared by all materials: give each its own slot.
-                    idb.animation_data.action_slot = act.slots.new(id_type, mat.name)
+                    slot = act.slots.new(id_type, mat.name)
+                    idb.animation_data.action_slot = slot
                     n = writer(act, idb, mat, ma, s, frames, switches)
                     wrote = wrote or n > 0
+                    if n == 0:
+                        act.slots.remove(slot)
                     # Keep looping animations (wing blur, idle glow) playing;
                     # one-shot ones and variant selectors (e.g. Lynel colors,
                     # one frame per variant) stay available as actions
