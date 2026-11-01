@@ -132,8 +132,10 @@ class TextureImporter:
             key = texture_hash(tex)
             fam = family(self.parent.path)
             if key is not None:
+                # (has_data is not checked: a packed image whose colorspace
+                # the material changed frees its buffer until it is used)
                 existing = next((im for im in bpy.data.images
-                                 if im.get(HASH_PROP) == key and im.has_data), None)
+                                 if im.get(HASH_PROP) == key), None)
                 if existing is not None:
                     log.info("Reusing image %s for texture %s", existing.name, tex.name)
                     _add_family(existing, fam)
