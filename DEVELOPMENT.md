@@ -175,3 +175,30 @@ It prints `identical to before.json`, or each mesh/image that changed and
 which fields. Use it for performance work and clean-ups; for fixes, the
 listed differences should be exactly the ones you meant.
 
+
+## Reading BotW's material shader (uking_mat)
+
+`bfres/Importer/uking_combiner.py` decodes uking_mat's color combiner
+options. The formulas were read from the game's compiled shaders, and
+`tools/uking_shader.py` repeats that for any material:
+
+```bash
+# once: Shader/uking_mat.product.sbfsha out of Pack/Bootup_Graphics.pack
+python3 tools/uking_shader.py extract <romfs.img> /tmp/uking_mat.bfsha
+# uniform blocks (gsys_material offsets: const_color0 @ 368, const_value0 @ 496...)
+python3 tools/uking_shader.py info /tmp/uking_mat.bfsha
+# programs for a material's shader options (a JSON dict of fmat.shaderOptions)
+python3 tools/uking_shader.py find /tmp/uking_mat.bfsha opts.json --app <Game>.app
+xcrun metal-objdump --disassemble <printed .metallib>   # LLVM IR (macOS)
+```
+
+`find` lists the programs whose static options match (render-state options
+like `gsys_alpha_test_func` are set by the engine and ignored) with their
+BNSH variation and, with `--app`, the Metal library NX2Apple/nxnative made
+for the pixel shader (`gsys_assign_gbuffer` is the deferred pass that
+writes albedo/normal/emission). In the IR, the material block is the
+`fp_c7`-like buffer bound to the program's `gsys_material` location (index
+= byte offset / 16), textures are `fp_t_tcb_<hex>` with register
+`(hex - 8) / 2` = the program's sampler location. Parameters that keep
+their default value (1.0) in every material using a program are folded
+into the code, so a missing load means "1".
