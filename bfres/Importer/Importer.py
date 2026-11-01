@@ -142,12 +142,37 @@ class Importer(ModelImporter):
             self._importFresEmbed(file)
 
         # import the models.
-        for i, model in enumerate(self.fres.models):
-            log.info("Importing model    %3d / %3d...",
-                i+1, len(self.fres.models))
-            self._importModel(model)
+        if not self.animationsOnly:
+            for i, model in enumerate(self.fres.models):
+                log.info("Importing model    %3d / %3d...",
+                    i+1, len(self.fres.models))
+                self._importModel(model)
+
+        if getattr(self.operator, 'import_animations', True):
+            self._importSkeletalAnims()
 
         return {'FINISHED'}
+
+
+    # Set by the caller to import only the animations of a file onto an
+    # existing armature (e.g. a model's *_Animation.sbfres).
+    animationsOnly = False
+    targetArmature = None
+
+    def _importSkeletalAnims(self):
+        from .AnimationImporter import AnimationImporter, find_target_armature
+        try:
+            anims = self.fres.readSkeletalAnims()
+        except Exception:
+            log.exception("Could not read skeletal animations")
+            return
+        if not anims:
+            return
+        target = self.targetArmature or getattr(self, 'armature', None)
+        if target is None:
+            names = [b.name for a in anims for b in a.bone_anims]
+            target = find_target_armature(self.context, names)
+        self.actions = AnimationImporter(self.context).import_anims(anims, target)
 
 
     def _importFresEmbed(self, file):

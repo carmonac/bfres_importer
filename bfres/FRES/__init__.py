@@ -212,7 +212,23 @@ class FRES(DumpMixin):
 
         self.models = self._readObjects(FMDL, 'fmdl',
             FMDLHeader.size)
-        # XXX fska, fmaa, fvis, fshu, fscn
+        # XXX fmaa, fvis, fshu, fscn (fska: see readSkeletalAnims)
+
+
+    def readSkeletalAnims(self):
+        """Parse the FSKA (skeletal animation) section. Returns a list of
+        FSKA.SkeletalAnim; empty when there are none or the layout is not
+        supported (BFRES v10 uses a different FSKA layout)."""
+        from . import FSKA
+        cnt  = self.header.get('fska_cnt', 0)
+        offs = self.header.get('fska_offset', 0)
+        if not cnt or not offs:
+            return []
+        if self.header['version'] == (0, 10):
+            log.info("Skeletal animations in BFRES v10 are not supported yet (%d skipped)", cnt)
+            return []
+        data = self.read(self.file.size, 0)
+        return FSKA.read_all(data, offs, cnt)
 
 
     def _readObjects(self, typ, name, size):

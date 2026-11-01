@@ -103,6 +103,11 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
         description="Set smooth=True on generated faces.",
         default=True)
     
+    import_animations: BoolProperty(name="Import Animations",
+        description="Import skeletal animations as actions, including those "
+                    "in a <model>_Animation file next to the model",
+        default=True)
+
     first_lod: BoolProperty(name="First LOD",
         description="Only import the first, most detailed LOD.",
         default=True)
@@ -142,7 +147,21 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
     
         log.info("importing: %s", self.properties.filepath)
         importer = Importer(self, context)
-        return importer.run(self.properties.filepath, **keywords)
+        result = importer.run(self.properties.filepath, **keywords)
+
+        # BotW keeps a model's skeletal animations in <model>_Animation.sbfres
+        if self.import_animations and getattr(importer, 'armature', None) is not None:
+            stem, ext = os.path.splitext(self.filepath)
+            if stem.endswith('.Tex'):
+                stem = stem[:-4]
+            animpath = stem + '_Animation' + ext
+            if os.path.exists(animpath) and animpath != self.filepath:
+                log.info("Importing animations from: %s", animpath)
+                animImporter = Importer(self, context)
+                animImporter.animationsOnly = True
+                animImporter.targetArmature = importer.armature
+                animImporter.run(animpath, **keywords)
+        return result
 
 class BFRES_PT_import_textures(bpy.types.Panel):
     bl_space_type = 'FILE_BROWSER'
@@ -235,6 +254,7 @@ class BFRES_PT_import_misc(bpy.types.Panel):
         sfile = context.space_data
         operator = sfile.active_operator
 
+        layout.prop(operator, "import_animations")
         layout.prop(operator, "save_decompressed")
         layout.prop(operator, "dump_debug")
 

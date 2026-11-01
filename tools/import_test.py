@@ -222,6 +222,19 @@ def material_stats(mat):
             "backface_culling": mat.use_backface_culling}
 
 
+def action_stats(act):
+    curves = 0
+    keys = 0
+    for layer in getattr(act, "layers", []):
+        for strip in layer.strips:
+            for bag in getattr(strip, "channelbags", []):
+                for fc in bag.fcurves:
+                    curves += 1
+                    keys += len(fc.keyframe_points)
+    return {"name": act.name, "frame_range": list(act.frame_range),
+            "fcurves": curves, "keyframes": keys}
+
+
 def scene_report():
     meshes = [mesh_stats(o) for o in bpy.data.objects if o.type == "MESH"]
     arms = [{"name": o.name, "bones": len(o.data.bones)}
@@ -244,7 +257,9 @@ def scene_report():
             # meshes whose normals mostly disagree with their faces
             "bad_normals": sum(1 for m in meshes if m["normal_agreement"] is not None
                                and m["normal_agreement"] < 0.5),
+            "actions": len(bpy.data.actions),
         },
+        "actions": [action_stats(a) for a in bpy.data.actions],
         "meshes": meshes,
         "armatures": arms,
         "images": imgs,
@@ -357,10 +372,11 @@ def summary_line(e):
         lines = [l for l in e["error"].strip().splitlines()
                  if l.strip() and not l.startswith(("Location:", "  "))]
         err = (lines[-1] if lines else "")[:70]
-    return "%-36s %-6s %6.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %4d  nrmbad %3d  log %3d  %s" % (
+    return "%-36s %-6s %6.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %4d  nrmbad %3d  anim %3d  log %3d  %s" % (
         e["file"][:36], e["status"], e["seconds"], t["meshes"], t["verts"],
         t["images"] - t["images_without_data"], t["images"],
-        t["uv_out_of_range"] + t["uv_nan"], t.get("bad_normals", 0), e["log_count"], err)
+        t["uv_out_of_range"] + t["uv_nan"], t.get("bad_normals", 0), t.get("actions", 0),
+        e["log_count"], err)
 
 
 def compare(report, baseline_path):
@@ -376,7 +392,7 @@ def compare(report, baseline_path):
         if o["status"] != e["status"]:
             diffs.append("status %s -> %s" % (o["status"], e["status"]))
         for k in ("meshes", "verts", "faces", "bones", "images", "images_without_data",
-                  "uv_out_of_range", "uv_nan", "bad_normals"):
+                  "uv_out_of_range", "uv_nan", "bad_normals", "actions"):
             if o["totals"].get(k) != e["totals"].get(k):
                 diffs.append("%s %s -> %s" % (k, o["totals"].get(k), e["totals"].get(k)))
         if o["seconds"] and abs(e["seconds"] - o["seconds"]) / o["seconds"] > 0.25:
