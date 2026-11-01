@@ -15,8 +15,9 @@ scanned too; those are reported as "archive//inner/path".
 
 The source is a DMROMFS1 image, an extracted RomFS folder or any folder with
 .sbfres/.bfres files (see extract_corpus.py). Pure Python, no numpy needed;
-the Yaz0 decoder is the add-on's own, so a whole Model/ folder takes a while
-(use -j to spread it over several processes).
+only the start of each file up to its string table is decompressed (with the
+add-on's Yaz0 decoder), so the whole BotW Model/ folder takes about a minute
+with -j 8.
 """
 import argparse
 import collections

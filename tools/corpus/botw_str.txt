@@ -4,15 +4,22 @@
 # Extract to a separate folder:
 #   extract_corpus.py <romfs> ~/Documents/bfres_corpus/botw_str --list tools/corpus/botw_str.txt
 #
-# Only 5 files in the whole RomFS have such strings, all UTF-8: these two,
-# their -01 siblings and Enemy_SiteBoss_Spear (already in botw_tex).
+# Only 5 of the 5876 Model/*.sbfres have such strings (none in the FRES
+# inside Pack/*.pack, nor in a 1/10 sample of actor/event packs), all valid
+# UTF-8 and none valid Shift-JIS: these two, their -01 siblings and
+# Enemy_SiteBoss_Spear (already in botw_tex). In all of them the string is
+# the value of a material user data entry named "comment" (type string).
+# The importer does not use user data; it failed only because the whole
+# string table is decoded up front.
 # The split models (-01..-03) have no Tex file of their own: the shared
 # <name>_Far.Tex.sbfres is copied too, but the importer does not link it.
 
-# Material name "カカリコ村の滝（透明+水中フォグ）" (Kakariko waterfall).
+# Mt_WaterFallCliffWhite_A comment: "カカリコ村の滝（透明+水中フォグ）"
+# (Kakariko village waterfall, transparent + underwater fog).
 FldObj_WaterFall_A_Far-03.sbfres
 FldObj_WaterFall_A_Far.Tex.sbfres
 
-# Material name "水平部分が水面の滝" (waterfall with a horizontal surface).
+# Mt_WaterFall_M_A comment: "水平部分が水面の滝"
+# (waterfall whose horizontal part is a water surface).
 FldObj_WaterFallAkkare_A_Far-03.sbfres
 FldObj_WaterFallAkkare_A_Far.Tex.sbfres
