@@ -18,8 +18,11 @@ This addon is currently in heavy development and large portions of it do not wor
         - Does not yet read material attributes or shader settings
         - Textures use default mapping to the first UV map only
     - [x] Bones 
-        - Bones import with proper parents, but are not connected tip to tail. 
-        - A very rudamentary "Auto Connect" is included
+        - Bones import with proper parents, not connected tip to tail by default
+        - "Auto Connect Bones" points each bone at its chain child (heads, skinning and animations stay exact)
+    - [x] LODs
+        - Only the most detailed LOD by default; with "First LOD" off the others go into hidden `<model>.LOD1`, `<model>.LOD2`... collections
+        - "Import Far Model" also imports `<model>_Far` into a hidden `<model>.Far` collection
     - [x] Skeletal animations (FSKA, BFRES 5.x)
         - Each animation becomes an action on the armature (sampled per frame, linear keys)
         - A model's `<model>_Animation` file next to it is imported automatically
@@ -48,7 +51,7 @@ Very much in development and may be full of bugs and rough corners.
 - Importing models, with their skeletons and textures, from `.bfres` and `.sbfres` files (at least `Animal_Fox` works)
     - Includes cases where textures are in a separate `.Tex.sbfres` file in the same directory
     - Textures are embedded in the `.blend` file
-    - Each LOD (level of detail) model is imported as a separate object, which might look strange when all of them are visible.
+    - Each LOD (level of detail) model is imported as a separate object; LODs other than the first are kept in hidden collections.
     - Materials' render/shader/material parameters are stored as Blender custom properties on the material objects.
     - Text files in the FRES are embedded into the blend file.
 
@@ -58,7 +61,6 @@ Very much in development and may be full of bugs and rough corners.
 - Decompressing is slow
     - Progress indicator sucks, but I don't think Blender provides any way to do a better one
 - `Animal_Bee`'s UV map is all wrong
-- The addon preferences don't show up and I have no idea why
 - Some texture formats might not decode correctly
 - Extra files in the FRES, which are neither text nor a supported format, are discarded
     - The game probably never does this, but it's technically possible
