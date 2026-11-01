@@ -39,3 +39,4 @@ __pycache__
 *.bntx
 report*.json
 renders/
+__pycache__/
