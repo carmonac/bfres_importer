@@ -87,3 +87,50 @@ class AttrDecodeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(np is None, "numpy not available")
+class AttrToFloatTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.d = load()
+
+    def test_bits(self):
+        self.assertEqual(self.d.bits(0x0B01), 8)
+        self.assertEqual(self.d.bits(0x1505), 16)
+        self.assertEqual(self.d.bits(0x0E02), 10)
+        with self.assertRaises(self.d.AttributeFormatError):
+            self.d.bits(0x7F01)
+
+    def test_floats_pass_through(self):
+        vals = self.d.decode(0x0B02, bytes((127, 0x81, 0, 64)), 0, 4, 1)
+        out = self.d.to_float(0x0B02, vals)
+        np.testing.assert_allclose(out, vals)
+        self.assertEqual(out.dtype, np.float32)
+
+    def test_uint_scaled_like_unorm(self):
+        vals = self.d.decode(0x0B03, bytes((0, 255, 51, 255)), 0, 4, 1)
+        np.testing.assert_allclose(self.d.to_float(0x0B03, vals), [[0, 1, 0.2, 1]], rtol=1e-6)
+
+    def test_sint_scaled_like_snorm(self):
+        vals = self.d.decode(0x1204, struct.pack("<2h", -32768, 32767), 0, 4, 1)
+        np.testing.assert_allclose(self.d.to_float(0x1204, vals), [[-1, 1]])
+
+    def test_rgba_unorm8(self):
+        vals = self.d.decode(0x0B01, bytes((255, 0, 51, 128)), 0, 4, 1)
+        out = self.d.rgba(0x0B01, vals)
+        np.testing.assert_allclose(out, [[1, 0, 0.2, 128 / 255]], rtol=1e-6)
+        self.assertEqual(out.shape, (1, 4))
+        self.assertEqual(out.dtype, np.float32)
+
+    def test_rgba_pads_missing_channels(self):
+        vals = self.d.decode(0x0901, bytes((255, 0)), 0, 2, 1)
+        np.testing.assert_allclose(self.d.rgba(0x0901, vals), [[1, 0, 0, 1]])
+        vals = self.d.decode(0x0201, bytes((51,)), 0, 1, 1)
+        np.testing.assert_allclose(self.d.rgba(0x0201, vals), [[0.2, 0, 0, 1]], rtol=1e-6)
+
+    def test_rgba_half_keeps_out_of_range(self):
+        # BotW stores data beyond 0..1 (and negative) in half-float colors
+        raw = np.array([4.0, -0.15, 0.5, 1.399], np.float16).view('<u2').tobytes()
+        vals = self.d.decode(0x1505, raw, 0, 8, 1)
+        np.testing.assert_allclose(self.d.rgba(0x1505, vals), [[4, -0.15, 0.5, 1.399]], atol=1e-3)

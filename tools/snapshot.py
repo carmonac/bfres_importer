@@ -9,7 +9,8 @@ Run inside Blender, once per version of the code:
 PATH is a model file or a folder (texture-only and animation-only files
 are skipped, as in import_test.py). For every mesh it hashes vertex
 positions, face corners, loop starts, smooth flags, every UV layer,
-corner normals and the full list of (vertex, group, weight); for every
+corner normals, color / tangent attributes (`_c0`, `_t0`...) and the
+full list of (vertex, group, weight); for every
 image, its pixels. Floats are rounded (positions 1e-4, UVs 1e-5,
 normals 1e-3, pixels 1e-4) so the hashes ignore float noise.
 
@@ -45,7 +46,7 @@ def mesh_fingerprint(ob):
     names = [g.name for g in ob.vertex_groups]
     weights = sorted((v.index, names[g.group], round(g.weight, 4))
                      for v in me.vertices for g in v.groups if g.weight > 0)
-    return {
+    out = {
         "verts": nv,
         "faces": np_,
         "co": _h(np.round(_get(me.vertices, "co", nv, np.float32, 3), 4)),
@@ -59,6 +60,28 @@ def mesh_fingerprint(ob):
         "weights": hashlib.sha1(repr(weights).encode()).hexdigest()[:16],
         "materials": [m.name for m in me.materials if m],
     }
+    attrs = _attr_fingerprints(me)
+    if attrs:  # only when present, so older snapshots still compare
+        out["attrs"] = attrs
+    return out
+
+
+_ATTR_FIELDS = {"FLOAT": ("value", 1), "FLOAT_VECTOR": ("vector", 3),
+                "FLOAT_COLOR": ("color", 4), "BYTE_COLOR": ("color", 4)}
+
+
+def _attr_fingerprints(me):
+    """Imported per-vertex attributes (colors, tangents: names `_xN`),
+    other than the UV maps."""
+    uvs = {l.name for l in me.uv_layers}
+    out = {}
+    for a in me.attributes:
+        if not a.name.startswith("_") or a.name in uvs or a.data_type not in _ATTR_FIELDS:
+            continue
+        field, width = _ATTR_FIELDS[a.data_type]
+        vals = _get(a.data, field, len(a.data), np.float32, width)
+        out[a.name] = "%s/%s/%s" % (a.domain, a.data_type, _h(np.round(vals, 3)))
+    return out
 
 
 def image_fingerprint(img):
