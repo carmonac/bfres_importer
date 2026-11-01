@@ -206,8 +206,13 @@ def rgba(func, data, width, height, *args):
     mod = get()
     if mod is None:
         return None
-    px = _bgra(getattr(mod, func)(bytes(data), width, height, *args), width, height)
-    return px[..., [2, 1, 0, 3]]
+    out = getattr(mod, func)(bytes(data), width, height, *args)
+    _bgra(out, width, height)   # size check
+    # swap B and R as 32-bit words: a contiguous result, unlike a fancy
+    # index on the channel axis (whose tobytes() is 10x slower than decoding)
+    v = np.frombuffer(out, '<u4')
+    v = (v & 0xFF00FF00) | ((v >> 16) & 0xFF) | ((v & 0xFF) << 16)
+    return v.astype('<u4', copy=False).view(np.uint8).reshape(height, width, 4)
 
 
 def channels(func, data, width, height, which):
