@@ -12,7 +12,8 @@ This addon is currently in heavy development and large portions of it do not wor
 - Importing into Blender
     - [x] Models
     - [x] Textures
-        - Very slow, needs work on 
+        - BC1-BC7 (BC6H as a float/HDR image), all ASTC block sizes, and the uncompressed formats BotW uses
+        - Decoded with the bundled native decoder [texture2ddecoder](https://github.com/K0lb3/texture2ddecoder) (MIT license, wheels in `wheels/`); without it, built-in Python decoders are used (everything but ASTC)
     - [ ] Materials
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
         - Does not yet read material attributes or shader settings

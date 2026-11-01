@@ -146,7 +146,17 @@ class BRTI:
 
         self._readMipmaps()
         self._readData()
-        self.pixels = self.format_.decompress(self)
+        # a texture that fails to decode must not take the whole BNTX
+        # (and the model's other textures) down with it
+        self.decodeError = None
+        try:
+            self.pixels = self.format_.decompress(self)
+        except Exception as ex:
+            log.error("Could not decode texture '%s' (%s %dx%d): %s",
+                self.name, type(self.format_).__name__, self.width,
+                self.height, ex)
+            self.pixels = None
+            self.decodeError = str(ex)
         return self
 
 
@@ -178,4 +188,4 @@ class BRTI:
         )
 
         self.mipData = result[:size]
-            
+            

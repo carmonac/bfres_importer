@@ -139,3 +139,31 @@ def bc5(data, width, height, signed=False):
     rg = np.stack((_channel(blk[..., :8], signed), _channel(blk[..., 8:], signed)), -1)
     img = _assemble(rg, width, height)
     return np.ascontiguousarray(img.reshape(-1, 2).T)
+
+
+def fix_color_blocks(rgba, data, width, height, block_size, four_color_only):
+    """Patch a natively decoded BC1/BC2/BC3 image where the native decoder
+    differs from the specification, i.e. blocks with color0 <= color1:
+
+    * BC1: index 3 is transparent black (the native decoder makes it opaque);
+    * BC2/BC3: such blocks still use 4-color interpolation (the native
+      decoder uses BC1's 3-color mode).
+
+    `rgba` is a (height, width, 4) uint8 image; only those blocks are
+    decoded again here, with the Python decoder. Returns the fixed image.
+    """
+    blk = _blocks(data, width, height, block_size)
+    col = blk[..., block_size - 8:]
+    sel = np.nonzero(_u16(col, 0) <= _u16(col, 2))
+    if not sel[0].size:
+        return rgba
+    bh, bw = blk.shape[:2]
+    tex = _color_block(col[sel][None], four_color_only)[0]   # (k, 16, 4)
+    pad = np.zeros((bh * 4, bw * 4, 4), np.uint8)
+    pad[:height, :width] = rgba
+    view = pad.reshape(bh, 4, bw, 4, 4).transpose(0, 2, 1, 3, 4)  # (bh, bw, 4, 4, 4)
+    old = view[sel].reshape(-1, 16, 4)
+    if four_color_only:
+        tex[..., 3] = old[..., 3]        # keep the separately coded alpha
+    view[sel] = tex.reshape(-1, 4, 4, 4)
+    return pad[:height, :width]

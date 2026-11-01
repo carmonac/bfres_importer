@@ -17,6 +17,19 @@ import struct
 from .base import TextureFormat
 import numpy as np
 
+class R8(TextureFormat):
+    """One channel, shown as gray (like BC4)."""
+    id = 0x02
+    bytesPerPixel = 1
+
+    def decodePixels(self, data):
+        v = np.frombuffer(bytes(data), dtype='B') / 255
+        rgba = np.empty(v.size * 4, dtype=np.float32)
+        rgba[0::4] = rgba[1::4] = rgba[2::4] = v
+        rgba[3::4] = 1
+        return rgba
+
+
 class R5G6B5(TextureFormat):
     # XXX untested code, needs confirmation
     id = 0x07

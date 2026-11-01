@@ -15,5 +15,16 @@ blender_version_min = "4.2.0"
 
 license = ["SPDX:GPL-3.0-or-later"]
 
+# Native texture decoder (texture2ddecoder, MIT). Optional: without it the
+# add-on falls back to its Python decoders (no ASTC). Blender installs the
+# wheel that matches the platform; bfres/BNTX/pixelfmt/native.py also loads
+# these files directly when the add-on runs from a checkout.
+wheels = [
+  "./wheels/texture2ddecoder-1.0.6-cp311-abi3-macosx_11_0_arm64.whl",
+  "./wheels/texture2ddecoder-1.0.6-cp311-abi3-macosx_10_9_x86_64.whl",
+  "./wheels/texture2ddecoder-1.0.6-cp311-abi3-win_amd64.whl",
+  "./wheels/texture2ddecoder-1.0.6-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+]
+
 [permissions]
 files = "Imports models from files"
