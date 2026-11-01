@@ -99,13 +99,19 @@ def _int_option(fmat, name, default):
 
 
 def slot_samplers(fmat):
-    """Material sampler name of each shader texture slot, in slot order
-    (slot N is uking_textureN_*, and source N of the color combiner)."""
+    """Material sampler name assigned to each shader texture slot, indexed
+    like combiner.TEXTURE_SLOTS (slot N is uking_textureN_* and source N of
+    the color combiner), None for slots the material doesn't use.
+
+    The material's sampler dictionary only lists the slots it uses (and
+    may list others first, e.g. lumberjack_thickness), so positions in it
+    are not slot numbers: the shader's own slot names are."""
     assign = fmat.shader_assign
     slots = [n.name for n in fmat.tex_attribute_dict.nodes][1:]
     values = [fmat.fres.readStr(fmat.fres.read('Q', assign['tex_attr_names'] + i * 8))
               for i in range(assign['num_tex_attrs'])]
-    return values[:len(slots)]
+    by_slot = dict(zip(slots, values))
+    return [by_slot.get(name) for name in combiner.TEXTURE_SLOTS]
 
 
 def param_floats(fmat, name):
@@ -135,7 +141,7 @@ def coords_for_samplers(fmat):
     """
     result = {}
     for slot_idx, sampler in enumerate(slot_samplers(fmat)):
-        if sampler in result:
+        if sampler is None or sampler in result:
             continue
         tc = _int_option(fmat, 'uking_texture%d_texcoord' % slot_idx, 0)
         if not 0 <= tc <= 4:
@@ -539,7 +545,8 @@ class NodeCombiner:
 
     A value is (rgb, a, scalar): an RGB(A) color socket and a float alpha
     socket; scalar values (one channel) use the same float socket for both,
-    which Blender broadcasts to gray where a color is expected.
+    which Blender broadcasts to gray where a color is expected. Operations
+    on colors use Vector Math (per component), on scalars Math.
     """
 
     def __init__(self, builder, comb):
@@ -563,9 +570,8 @@ class NodeCombiner:
         rgb, a, scalar = self.value(expr)
         if scalar:
             return rgb
-        # a whole color where one value is expected: its luminance-free
-        # average would differ from the game, red is what single-channel
-        # data maps (BC4 masks) hold
+        # a whole color where one value is expected: red is what
+        # single-channel data maps (BC4 masks) hold
         return self._separate(rgb)[0]
 
     def value(self, expr):
@@ -574,17 +580,68 @@ class NodeCombiner:
             self._cache[key] = self._build(expr)
         return self._cache[key]
 
+    # ------------------------------------------------------------ helpers
+
     def _separate(self, rgb):
         sep = self._node('ShaderNodeSeparateColor', -950)
         self.b.links.new(rgb, sep.inputs['Color'])
         return sep.outputs['Red'], sep.outputs['Green'], sep.outputs['Blue']
 
-    def _one_minus_float(self, sock):
-        m = self._node('ShaderNodeMath', -800, '1 - x')
-        m.operation = 'SUBTRACT'
-        m.inputs[0].default_value = 1.0
-        self.b.links.new(sock, m.inputs[1])
+    def _math(self, op, a, b=None, label=None, clamp=False):
+        m = self._node('ShaderNodeMath', -650, label)
+        m.operation = op
+        m.use_clamp = clamp
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                m.inputs[i].default_value = v
+            else:
+                self.b.links.new(v, m.inputs[i])
         return m.outputs['Value']
+
+    def _vmath(self, op, a, b=None, label=None):
+        m = self._node('ShaderNodeVectorMath', -650, label)
+        m.operation = op
+        for i, v in enumerate((a, b)):
+            if v is None:
+                continue
+            if isinstance(v, (int, float)):
+                if op == 'SCALE' and i == 1:
+                    m.inputs['Scale'].default_value = v
+                else:
+                    m.inputs[i].default_value = (v, v, v)
+            else:
+                self.b.links.new(v, m.inputs[i])
+        return m.outputs['Vector'] if op != 'SCALE' else m.outputs['Vector']
+
+    def _op(self, op, x, y, label):
+        """Binary per-component op ('ADD', 'SUBTRACT', 'MULTIPLY', 'POWER')."""
+        (r1, a1, s1), (r2, a2, s2) = x, y
+        alpha = self._math(op, a1, a2, label + ' (alpha)')
+        if s1 and s2:
+            return alpha, alpha, True
+        return self._vmath(op, r1, r2, label), alpha, False
+
+    def _mix(self, x, y, c, label):
+        d = self._op('SUBTRACT', y, x, label + ': B - A')
+        m = self._op('MULTIPLY', d, c, label + ': (B - A) C')
+        return self._op('ADD', m, x, label + ': mix(A, B, C)')
+
+    def _clamp(self, v, label):
+        rgb, a, scalar = v
+        ca = self._math('ADD', a, 0.0, label + ' (clamp)', clamp=True)
+        if scalar:
+            return ca, ca, True
+        mix = self._node('ShaderNodeMix', -650, label + ' (clamp)')
+        mix.data_type = 'RGBA'
+        mix.clamp_result = True
+        mix.inputs['Factor'].default_value = 0.0
+        self.b.links.new(rgb, mix.inputs['A'])
+        self.b.links.new(rgb, mix.inputs['B'])
+        return mix.outputs['Result'], ca, False
+
+    # ------------------------------------------------------------ build
 
     def _build(self, e):
         C = combiner
@@ -612,13 +669,34 @@ class NodeCombiner:
             n = self._node('ShaderNodeValue', -1150, 'const_value%d' % e.index)
             n.outputs[0].default_value = v
             return n.outputs[0], n.outputs[0], True
+        if isinstance(e, C.Literal):
+            n = self._node('ShaderNodeValue', -1150, '%g' % e.value)
+            n.outputs[0].default_value = e.value
+            return n.outputs[0], n.outputs[0], True
+        if isinstance(e, C.Builtin):
+            if e.code == C.VIEW_DEPTH:
+                n = self._node('ShaderNodeCameraData', -1150, 'view depth')
+                s = n.outputs['View Z Depth']
+            else:
+                # clamp(1 + N.V): 0 facing the camera, 1 at grazing angles
+                n = self._node('ShaderNodeLayerWeight', -1150, 'rim (1 + N.V)')
+                n.inputs['Blend'].default_value = 0.5
+                s = n.outputs['Facing']
+            return s, s, True
         if isinstance(e, C.Channel):
             rgb, a, scalar = self.value(e.expr)
             if e.comp == 0:
-                if e.invert:
-                    inv = self._node('ShaderNodeInvert', -800, '1 - x')
-                    links.new(rgb, inv.inputs['Color'])
-                    rgb, a = inv.outputs['Color'], self._one_minus_float(a)
+                if e.mod == 1:
+                    a = self._math('SUBTRACT', 1.0, a, '1 - x')
+                    if scalar:
+                        rgb = a
+                    else:
+                        inv = self._node('ShaderNodeInvert', -800, '1 - x')
+                        links.new(rgb, inv.inputs['Color'])
+                        rgb = inv.outputs['Color']
+                elif e.mod == 2:
+                    a = self._math('MULTIPLY', a, -1.0, '-x')
+                    rgb = a if scalar else self._vmath('SCALE', rgb, -1.0, '-x')
                 return rgb, a, scalar
             if scalar:
                 s = rgb
@@ -626,83 +704,54 @@ class NodeCombiner:
                 s = a
             else:
                 s = self._separate(rgb)[e.comp - 1]
-            if e.invert:
-                s = self._one_minus_float(s)
+            if e.mod == 1:
+                s = self._math('SUBTRACT', 1.0, s, '1 - x')
+            elif e.mod == 2:
+                s = self._math('MULTIPLY', s, -1.0, '-x')
             return s, s, True
         if isinstance(e, C.Stage):
             return self._stage(e)
         raise TypeError(e)
 
     def _stage(self, e):
-        links = self.b.links
-        args = [self.value(a) for a in e.args]
-        x = -650
-        label = 'color%d' % e.index
-        if e.calc_type == 0:
-            rgb, a, scalar = args[0]
-            if not e.clamp:
-                return args[0]
-            mix = self._node('ShaderNodeMix', x, label + ' (clamp)')
-            mix.data_type = 'RGBA'
-            mix.clamp_result = True
-            mix.inputs['Factor'].default_value = 0.0
-            links.new(rgb, mix.inputs['A'])
-            links.new(rgb, mix.inputs['B'])
-            return mix.outputs['Result'], self._clamp(a), scalar
-        if e.calc_type == 2:
-            (r1, a1, s1), (r2, a2, s2) = args[0], args[1]
-            mix = self._node('ShaderNodeMix', x, label + ': A x B')
-            mix.data_type = 'RGBA'
-            mix.blend_type = 'MULTIPLY'
-            mix.inputs['Factor'].default_value = 1.0
-            mix.clamp_result = e.clamp
-            links.new(r1, mix.inputs['A'])
-            links.new(r2, mix.inputs['B'])
-            m = self._node('ShaderNodeMath', x, label + ' alpha')
-            m.operation = 'MULTIPLY'
-            m.use_clamp = e.clamp
-            links.new(a1, m.inputs[0])
-            links.new(a2, m.inputs[1])
-            scalar = s1 and s2
-            return (m.outputs['Value'] if scalar else mix.outputs['Result']), m.outputs['Value'], scalar
-        if e.calc_type == 4:
-            (r1, a1, s1), (r2, a2, s2), (rc, ac, sc) = args
-            if sc:
-                mix = self._node('ShaderNodeMix', x, label + ': mix(A, B, C)')
-                mix.data_type = 'RGBA'
-                mix.clamp_result = e.clamp
-                links.new(rc, mix.inputs['Factor'])
-                links.new(r1, mix.inputs['A'])
-                links.new(r2, mix.inputs['B'])
-                rgb = mix.outputs['Result']
-            else:
-                # per-channel factor
-                mix = self._node('ShaderNodeMix', x, label + ': mix(A, B, C)')
-                mix.data_type = 'VECTOR'
-                mix.factor_mode = 'NON_UNIFORM'
-                links.new(rc, mix.inputs[1])   # Factor (vector)
-                links.new(r1, mix.inputs[4])   # A (vector)
-                links.new(r2, mix.inputs[5])   # B (vector)
-                rgb = mix.outputs[1]           # Result (vector)
-                if e.clamp:
-                    cl = self._node('ShaderNodeMix', x, label + ' (clamp)')
-                    cl.data_type = 'RGBA'
-                    cl.clamp_result = True
-                    cl.inputs['Factor'].default_value = 0.0
-                    links.new(rgb, cl.inputs['A'])
-                    links.new(rgb, cl.inputs['B'])
-                    rgb = cl.outputs['Result']
-            ma = self._node('ShaderNodeMix', x, label + ' alpha')
-            ma.data_type = 'FLOAT'
-            ma.clamp_result = e.clamp
-            links.new(ac, ma.inputs['Factor'])
-            links.new(a1, ma.inputs['A'])
-            links.new(a2, ma.inputs['B'])
-            scalar = s1 and s2
-            return (ma.outputs['Result'] if scalar else rgb), ma.outputs['Result'], scalar
-        raise combiner.Unsupported('calc type %d' % e.calc_type)
-
-    def _clamp(self, sock):
-        c = self._node('ShaderNodeClamp', -650, 'clamp')
-        self.b.links.new(sock, c.inputs['Value'])
-        return c.outputs['Result']
+        v = [self.value(a) for a in e.args]
+        L = 'color%d' % e.index
+        op = self._op
+        t = e.calc_type
+        if t == 0:
+            r = v[0]
+        elif t == 1:
+            r = op('ADD', v[0], v[1], L + ': A + B')
+        elif t == 2:
+            r = op('MULTIPLY', v[0], v[1], L + ': A x B')
+        elif t == 4:
+            r = self._mix(v[0], v[1], v[2], L)
+        elif t == 5:
+            r = op('MULTIPLY', op('ADD', v[0], v[1], L + ': A + B'), v[2], L + ': (A + B) C')
+        elif t == 6:
+            r = op('SUBTRACT', op('MULTIPLY', v[2], v[3], L + ': C D'),
+                   op('MULTIPLY', v[0], v[1], L + ': A B'), L + ': C D - A B')
+        elif t == 7:
+            r = op('POWER', v[0], v[1], L + ': pow(A, B)')
+        elif t == 8:
+            r = op('ADD', op('MULTIPLY', v[0], v[1], L + ': A B'), v[2], L + ': A B + C')
+        elif t == 9:
+            r = op('MULTIPLY', op('MULTIPLY', v[0], v[1], L + ': A B'), v[2], L + ': A B C')
+        elif t == 11:
+            r = op('MULTIPLY', op('MULTIPLY', op('MULTIPLY', v[0], v[1], L + ': A B'),
+                                  v[2], L + ': A B C'), v[3], L + ': A B C D')
+        elif t == 12:
+            r = op('MULTIPLY', self._mix(v[0], v[1], v[2], L), v[3], L + ': mix(A, B, C) D')
+        elif t == 15:
+            r = op('ADD', self._mix(v[0], v[1], v[2], L), v[3], L + ': mix(A, B, C) + D')
+        elif t == 21:
+            r = op('MULTIPLY', op('ADD', op('MULTIPLY', v[0], v[1], L + ': A B'), v[2],
+                                  L + ': A B + C'), v[3], L + ': (A B + C) D')
+        elif t == 28:
+            r = op('ADD', op('MULTIPLY', op('POWER', v[0], v[1], L + ': pow(A, B)'), v[2],
+                             L + ': pow(A, B) C'), v[3], L + ': pow(A, B) C + D')
+        else:
+            raise combiner.Unsupported('calc type %d' % t)
+        if e.clamp:
+            r = self._clamp(r, L)
+        return r
