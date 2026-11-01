@@ -132,6 +132,7 @@ class AnimationImporter:
         act.frame_start, act.frame_end = 0, max(anim.frame_count, 1)
         act.use_cyclic = anim.looping
         act['bfres_looping'] = anim.looping
+        act['bfres_name'] = anim.name or ''
         arm_obj.animation_data.action = act
 
         bones = arm_obj.data.bones

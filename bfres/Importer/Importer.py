@@ -191,8 +191,12 @@ class Importer(ModelImporter):
         objects = [ob for ob in bpy.data.objects if ob.type == 'MESH'
                    and (arm is None or any(m.type == 'ARMATURE' and m.object == arm
                                            for m in ob.modifiers))]
+        # the game plays a model's skeletal and visibility animations of the
+        # same name together (e.g. FldObj_Mound_A_01_Break): share the action
+        shared = {a['bfres_name']: a for a in self.__dict__.get('actions') or []
+                  if a.get('bfres_name')}
         self.visibilityActions = VisibilityAnimationImporter(self.context).import_anims(
-            anims, objects, materials)
+            anims, objects, materials, shared)
 
     def _importSkeletalAnims(self):
         from .AnimationImporter import AnimationImporter, find_target_armature
