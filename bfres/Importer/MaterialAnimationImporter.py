@@ -115,8 +115,13 @@ class MaterialAnimationImporter:
         """Turn `node` into a texture switch over `names`. Returns
         {texture name: index of the Value node}."""
         nt = mat.node_tree
+        # keep the material's own texture as index 0 (the look when the
+        # animation is not playing)
+        if node.image is not None and node.image.name in names:
+            names = [node.image.name] + [n for n in names if n != node.image.name]
+        elif node.image is not None:
+            names = [node.image.name] + names
         index = {n: i for i, n in enumerate(names)}
-        node.image = bpy.data.images[names[0]]
         if len(names) == 1:
             return index
         nodes, links = nt.nodes, nt.links
@@ -173,16 +178,28 @@ class MaterialAnimationImporter:
         wrote = False
         for ma in s.materials:
             for mat in materials_named(ma.name, materials):
-                for idb, writer in ((mat, self._write_params), (mat.node_tree, self._write_nodes)):
+                for idb, id_type, writer in ((mat, 'MATERIAL', self._write_params),
+                                             (mat.node_tree, 'NODETREE', self._write_nodes)):
                     if idb.animation_data is None:
                         idb.animation_data_create()
                     previous = idb.animation_data.action
+                    previous_slot = idb.animation_data.action_slot
                     idb.animation_data.action = act
+                    # Every embedded node tree is called "Shader Nodetree",
+                    # so the default slot (named after the ID) would be
+                    # shared by all materials: give each its own slot.
+                    idb.animation_data.action_slot = act.slots.new(id_type, mat.name)
                     n = writer(act, idb, mat, ma, s, frames, switches)
                     wrote = wrote or n > 0
-                    # the first animation touching an ID stays active
-                    if previous is not None or n == 0:
+                    # Keep looping animations (wing blur, idle glow) playing;
+                    # one-shot ones and variant selectors (e.g. Lynel colors,
+                    # one frame per variant) stay available as actions
+                    # without changing the material's default look. The
+                    # first animation that qualifies wins.
+                    if previous is not None or n == 0 or not s.looping:
                         idb.animation_data.action = previous
+                        if previous is not None:
+                            idb.animation_data.action_slot = previous_slot
         if not wrote:
             bpy.data.actions.remove(act)
             return None
