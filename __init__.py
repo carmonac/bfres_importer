@@ -14,7 +14,7 @@ bl_info = {
     "location": "File > Import-Export",
     "warning": "This add-on is under heavy development, please ensure you're using the latest version",
     "doc_url": "https://github.com/RenaKunisaki/bfres_importer/wiki",
-    "tracker_url": "https://github.com/ranidspace/bfres_importer/issues",
+    "tracker_url": "https://github.com/carmonac/bfres_importer/issues",
     "support": 'COMMUNITY',
     "category": "Import-Export"
 }

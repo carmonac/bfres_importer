@@ -32,3 +32,10 @@ __pycache__
 *.i*86
 *.x86_64
 *.hex
+
+# test corpus and harness output (game files must never be committed)
+*.sbfres
+*.bfres
+*.bntx
+report*.json
+renders/

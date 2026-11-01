@@ -6,7 +6,7 @@ id = "bfres_importer"
 version = "0.2.0"
 name = "Nintendo BFRES format"
 tagline = "Import BFRES models"
-maintainer = "Ranidspace"
+maintainer = "Ranidspace, carmonac"
 type = "add-on"
 
 tags = ["Import-Export"]
