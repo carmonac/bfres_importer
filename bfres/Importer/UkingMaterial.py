@@ -50,6 +50,7 @@ SUFFIX_ROLES = {
     'EmmMsk': 'emission_mask', 'Mtl': 'metalness', 'AO': 'ao',
 }
 COLOR_ROLES = {'albedo', 'emission'}
+DATA_ROLES = {'normal', 'specular', 'metalness', 'ao', 'emission_mask', 'opacity'}
 
 
 def texture_suffix(name):
@@ -127,10 +128,13 @@ class UkingMaterialBuilder:
             self._uv_nodes[layer] = n
         return self._uv_nodes[layer]
 
-    def _image(self, image, role, sampler, uv_layer, x, y):
+    def _image(self, image, role, sampler, uv_layer, x, y, wired=True):
         n = self._node('ShaderNodeTexImage', x, y, '%s (%s)' % (role, sampler))
         n.image = image
-        if role not in COLOR_ROLES:
+        # Images are shared between materials: only switch to Non-Color for
+        # data maps that are actually wired, never for loose nodes, so an
+        # albedo that also appears unconnected elsewhere keeps its colors.
+        if wired and role in DATA_ROLES:
             image.colorspace_settings.name = 'Non-Color'
         if uv_layer != '_u0':
             self.links.new(self._uv(uv_layer).outputs['UV'], n.inputs['Vector'])
@@ -177,7 +181,8 @@ class UkingMaterialBuilder:
         self._metalness(by_role.get('metalness'))
         self._emission(by_role.get('emission'), by_role.get('emission_mask'))
         for role, (sampler, texname, image, uv) in loose:
-            n = self._image(image, role or 'unused', sampler, uv, -900, -900 - self._loose_y)
+            n = self._image(image, role or 'unused', sampler, uv, -900, -900 - self._loose_y,
+                            wired=False)
             n.label = '%s (%s, not connected)' % (role or 'unknown', sampler)
             self._loose_y += 280
             log.debug("%s: texture %s (%s) left unconnected",
