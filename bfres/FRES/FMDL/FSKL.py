@@ -155,7 +155,10 @@ class FSKL(FresObject):
             log.info("no smooth idxs")
             return
 
-        for i in range(max(self.smooth_idxs)):
+        # One inverse bind matrix per smooth matrix index. (The old loop used
+        # max(smooth_idxs), the highest *bone* index, and read past the end
+        # of the array, which is where the "is nan" warnings came from.)
+        for i in range(self.header['num_smooth_idxs']):
             # read the matrix
             mtx = self.fres.read('3f', count = 4,
                 pos = self.header['smooth_mtx_offs'] + (i*16*3))

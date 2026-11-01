@@ -113,8 +113,36 @@ def reset_scene():
     ensure_addon()
 
 
+def normal_agreement(me):
+    """How well the custom (split) normals agree with the face normals.
+
+    Returns (mean dot product, fraction of corners pointing away from
+    their face). Correct normals give a mean close to 1 and ~0 flipped;
+    normals in the wrong space or axis give a low mean or many flips.
+    """
+    import numpy as np
+    n_loops = len(me.loops)
+    if not n_loops or not len(me.polygons):
+        return None, None
+    corner = np.empty(n_loops * 3, np.float32)
+    me.corner_normals.foreach_get("vector", corner)
+    face = np.empty(len(me.polygons) * 3, np.float32)
+    me.polygon_normals.foreach_get("vector", face)
+    start = np.empty(len(me.polygons), np.int64)
+    total = np.empty(len(me.polygons), np.int64)
+    me.polygons.foreach_get("loop_start", start)
+    me.polygons.foreach_get("loop_total", total)
+    polys = np.repeat(np.arange(len(me.polygons)), total)
+    within = np.arange(total.sum()) - np.repeat(np.cumsum(total) - total, total)
+    poly_of_loop = np.empty(n_loops, np.int64)
+    poly_of_loop[np.repeat(start, total) + within] = polys
+    dots = np.einsum("ij,ij->i", corner.reshape(-1, 3), face.reshape(-1, 3)[poly_of_loop])
+    return round(float(dots.mean()), 4), round(float((dots < 0).mean()), 4)
+
+
 def mesh_stats(ob):
     me = ob.data
+    nrm_mean, nrm_flipped = normal_agreement(me)
     uv_out = uv_nan = 0
     uv_total = 0
     for layer in me.uv_layers:
@@ -139,6 +167,8 @@ def mesh_stats(ob):
         "faces": len(me.polygons),
         "uv_layers": [l.name for l in me.uv_layers],
         "uv_out_of_range": uv_out,
+        "normal_agreement": nrm_mean,
+        "normals_flipped": nrm_flipped,
         "uv_nan": uv_nan,
         "uv_loops": uv_total,
         "color_attrs": [a.name for a in me.color_attributes],
@@ -187,6 +217,9 @@ def scene_report():
             "materials": len(mats),
             "uv_out_of_range": sum(m["uv_out_of_range"] for m in meshes),
             "uv_nan": sum(m["uv_nan"] for m in meshes),
+            # meshes whose normals mostly disagree with their faces
+            "bad_normals": sum(1 for m in meshes if m["normal_agreement"] is not None
+                               and m["normal_agreement"] < 0.5),
         },
         "meshes": meshes,
         "armatures": arms,
@@ -281,10 +314,10 @@ def summary_line(e):
         lines = [l for l in e["error"].strip().splitlines()
                  if l.strip() and not l.startswith(("Location:", "  "))]
         err = (lines[-1] if lines else "")[:70]
-    return "%-40s %-6s %7.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %5d  log %3d  %s" % (
-        e["file"][:40], e["status"], e["seconds"], t["meshes"], t["verts"],
+    return "%-36s %-6s %6.1fs  mesh %3d  vtx %7d  img %3d/%-3d  uvbad %4d  nrmbad %3d  log %3d  %s" % (
+        e["file"][:36], e["status"], e["seconds"], t["meshes"], t["verts"],
         t["images"] - t["images_without_data"], t["images"],
-        t["uv_out_of_range"] + t["uv_nan"], e["log_count"], err)
+        t["uv_out_of_range"] + t["uv_nan"], t.get("bad_normals", 0), e["log_count"], err)
 
 
 def compare(report, baseline_path):
@@ -300,7 +333,7 @@ def compare(report, baseline_path):
         if o["status"] != e["status"]:
             diffs.append("status %s -> %s" % (o["status"], e["status"]))
         for k in ("meshes", "verts", "faces", "bones", "images", "images_without_data",
-                  "uv_out_of_range", "uv_nan"):
+                  "uv_out_of_range", "uv_nan", "bad_normals"):
             if o["totals"].get(k) != e["totals"].get(k):
                 diffs.append("%s %s -> %s" % (k, o["totals"].get(k), e["totals"].get(k)))
         if o["seconds"] and abs(e["seconds"] - o["seconds"]) / o["seconds"] > 0.25:
