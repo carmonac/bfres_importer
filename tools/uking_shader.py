@@ -263,13 +263,23 @@ class ShaderModel:
             out[opt.name] = opt.choices[c] if c < len(opt.choices) else '?%d' % c
         return out
 
-    def find(self, options, dynamic=None):
+    # The engine sets these from the material's render info at runtime
+    # (e.g. gsys_alpha_test_func is 0 in the material, 6 'gequal' in the
+    # program), so they are not compared by default.
+    RUNTIME = ('gsys_alpha_test_func', 'gsys_alpha_test_enable', 'gsys_renderstate',
+               'gsys_pass')
+
+    def find(self, options, dynamic=None, ignore=RUNTIME):
         """Indices of the programs whose static options equal `options`
-        (missing ones take the option's default), and dynamic ones equal
-        `dynamic` where given."""
+        (missing ones take the option's default; options in `ignore` are not
+        compared), and dynamic ones equal `dynamic` where given."""
         nk = self.static_key_len + self.dynamic_key_len
         want = [0] * self.static_key_len
+        mask = [0] * self.static_key_len
         for opt in self.static:
+            if opt.name in ignore:
+                continue
+            mask[opt.index] |= opt.mask
             choice = opt.default
             v = options.get(opt.name)
             if v is not None:
@@ -280,7 +290,8 @@ class ShaderModel:
             opt.set(want, opt.index, choice)
         found = []
         for i in range(len(self.programs)):
-            if self.keys[nk * i:nk * i + self.static_key_len] != want:
+            keys = self.keys[nk * i:nk * i + self.static_key_len]
+            if any((k ^ w) & m for k, w, m in zip(keys, want, mask)):
                 continue
             if dynamic:
                 d = self.program_dynamic(i)
