@@ -3,9 +3,11 @@ import bmesh
 import bpy
 import bpy_extras
 import struct
+import numpy as np
 from .MaterialImporter import MaterialImporter
 from .SkeletonImporter import SkeletonImporter
 from ..Exceptions import UnsupportedFormatError, MalformedFileError
+from ..FRES.FMDL.Attribute import decode as attrdecode
 import mathutils
 
 
@@ -41,14 +43,10 @@ class LodImporter:
     def _getAttrBuffers(self):
         """Get attribute data for this LOD.
 
-        Returns a dict of attribute name => [values].
+        Returns a dict of attribute name => numpy array of shape
+        (vertices, components). Normalized formats come out as floats
+        (UNorm 0..1, SNorm -1..1) and integer formats as ints.
         """
-        attrBuffers = {}
-        for attr in self.fvtx.attrs:
-            attrBuffers[attr.name] = []
-
-        #log.debug("LOD submeshes: %s", self.lod.submeshes)
-
         # Faces index into one vertex array shared by every submesh, so
         # read each vertex once, up to the highest index any submesh uses.
         nVtxs = 0
@@ -60,29 +58,47 @@ class LodImporter:
         if len(self.lod.idx_buf):
             nVtxs = max(nVtxs, max(self.lod.idx_buf) + 1)
 
-        for idx in range(nVtxs):
-            for attr in self.fvtx.attrs:
-                fmt  = attr.format
-                func = fmt.get('func', None)
-                size = struct.calcsize(fmt['fmt'])
-                buf  = self.fvtx.buffers[attr.buf_idx]
-                offs = attr.buf_offs + (idx * buf.stride)
-                data = buf.data[offs : offs + size]
-                try:
-                    data = struct.unpack(fmt['fmt'], data)
-                except struct.error:
-                    log.error("Vertex %d reading out of bounds for attribute '%s' (offs=0x%X len=0x%X fmt=%s)",
-                        idx, attr.name, offs, len(buf.data), fmt['fmt'])
-                    raise MalformedFileError("Vertex %d reading out of bounds for attribute '%s'" % (
-                        idx, attr.name))
-                if func: data = func(data)
-                attrBuffers[attr.name].append(data)
-
-        #for name, data in attrBuffers.items():
-        #    print("%s: %s" % (
-        #        name, ' '.join(map(str, data[0:16]))
-        #    ))
+        attrBuffers = {}
+        for attr in self.fvtx.attrs:
+            buf = self.fvtx.buffers[attr.buf_idx]
+            try:
+                attrBuffers[attr.name] = attrdecode.decode(attr.formatID,
+                    buf.data, attr.buf_offs, buf.stride, nVtxs)
+            except attrdecode.AttributeFormatError as ex:
+                raise MalformedFileError("Attribute '%s': %s" % (attr.name, ex))
         return attrBuffers
+
+
+    def _boneRotation(self, bone):
+        """Rotation part of a bone's world matrix (includes Y-up -> Z-up)."""
+        return bone.matrix.to_3x3().normalized()
+
+
+    def _vertexNormals(self, n0):
+        """Per-vertex normals in Blender space, consistent with how
+        `_addVerticesToMesh` places the positions."""
+        skin = self.fshp.header['vtx_skin_cnt']
+        n = np.asarray(n0, dtype=np.float64)[:, :3]
+        if skin == 0:
+            # rigid mesh bound to one bone: rotate like the positions
+            R = np.array(self._boneRotation(
+                self.fmdl.skeleton.bones[self.fshp.header['single_bind']]))
+            out = n @ R.T
+        elif skin == 1:
+            # each vertex follows its own rigid matrix
+            i0 = self.attrBuffers['_i0'][:, 0]
+            out = np.empty_like(n)
+            for midx in np.unique(i0):
+                R = np.array(self._boneRotation(
+                    self.fmdl.skeleton.boneRigidMtxGroups[int(midx)][0]))
+                sel = i0 == midx
+                out[sel] = n[sel] @ R.T
+        else:
+            # skinned mesh: bind pose is in model space, Y-up -> Z-up
+            out = np.stack((n[:, 0], -n[:, 2], n[:, 1]), axis=1)
+        length = np.linalg.norm(out, axis=1, keepdims=True)
+        length[length == 0] = 1
+        return out / length
 
 
     def _createMesh(self):
@@ -107,20 +123,7 @@ class LodImporter:
         mdata   = meshObj.data
 
         # make split normals
-        normals = []
-        for v in mdata.vertices:
-            x = n0[v.index][0]
-            y = n0[v.index][1]
-            z = n0[v.index][2]
-            if self.fshp.header['vtx_skin_cnt'] == 1:
-                midx = self.attrBuffers['_i0'][v.index][0]
-                M = self.fmdl.skeleton.boneRigidMtxGroups[midx][0].matrix
-                M = M.decompose()[1]
-                P = mathutils.Vector((x,y,z))
-                P = M @ P
-            else:
-                P = mathutils.Vector((x,-z,y))
-            normals.append(P)
+        normals = self._vertexNormals(n0)[:len(mdata.vertices)].tolist()
 
         mdata.normals_split_custom_set_from_vertices(normals)
 
@@ -185,71 +188,61 @@ class LodImporter:
 
     def _addVerticesToMesh(self, mesh, vtxs, nrms):
         """Add vertices (from `_p0` attribute) to a `bmesh`."""
-        for i in range(len(vtxs)):
-            try:
-                if len(vtxs[i]) == 4:
-                    x, y, z, w = vtxs[i]
-                else:
-                    x, y, z = vtxs[i]
-                    w = 1
-                if w != 1:
-                    # Blender doesn't support the W coord,
-                    # but it's never used anyway.
-                    # XXX it can be used if the mesh uses quaternions
-                    # (or is it only skeletons that have that flag?)
-                    log.warn("FRES: FSHP vertex #%d W coord is %f, should be 1", i, w)
-            except IndexError:
-                log.error("LOD submesh vtx %d is out of bounds (max %d)",
-                    i, len(vtxs))
-                raise
-            # If the skin count is 0 or 1, it's a rigid mesh and needs a transformation
-            match self.fshp.header['vtx_skin_cnt']:
-                case 0:
-                    midx = self.fshp.header['single_bind']
-                    M = self.fmdl.skeleton.bones[midx].matrix
-                    P = mathutils.Vector((x,y,z))
-                    P = M @ P
-                    x, y, z = P
-                    vert = mesh.verts.new((x, y, z))
-                case 1:
-                    # XXX too many indexes i think.
-                    midx = self.attrBuffers['_i0'][i][0]
-                    M = self.fmdl.skeleton.boneRigidMtxGroups[midx][0].matrix
-                    P = mathutils.Vector((x,y,z))
-                    P = M @ P
-                    x, y, z = P
-                    vert = mesh.verts.new((x, y, z))
-                case _:
-                    vert = mesh.verts.new((x, -z, y))
-            # Custom Split verticies
-            x, y, z = nrms[i][0:3]
-            vert.normal = (x, -z, y)
-            vert.index = i
+        vtxs = np.asarray(vtxs, dtype=np.float64)
+        if vtxs.shape[1] == 4:
+            bad = np.count_nonzero(vtxs[:, 3] != 1)
+            if bad:
+                # Blender has no W coordinate; it is normally always 1.
+                log.warning("%s: %d vertex position(s) have W != 1",
+                    self.fshp.name, bad)
+        pos = vtxs[:, :3]
 
+        # Rigid meshes (skin count 0 or 1) are stored in bone space and
+        # need the bone's world transform; skinned meshes are in model space.
+        match self.fshp.header['vtx_skin_cnt']:
+            case 0:
+                M = self.fmdl.skeleton.bones[self.fshp.header['single_bind']].matrix
+                pos = self._transform(pos, M)
+            case 1:
+                i0 = self.attrBuffers['_i0'][:, 0]
+                out = np.empty_like(pos)
+                for midx in np.unique(i0):
+                    M = self.fmdl.skeleton.boneRigidMtxGroups[int(midx)][0].matrix
+                    sel = i0 == midx
+                    out[sel] = self._transform(pos[sel], M)
+                pos = out
+            case _:
+                pos = np.stack((pos[:, 0], -pos[:, 2], pos[:, 1]), axis=1)
+
+        for i, co in enumerate(pos.tolist()):
+            vert = mesh.verts.new(co)
+            vert.index = i
         mesh.verts.ensure_lookup_table()
+
+
+    @staticmethod
+    def _transform(points, M):
+        M = np.array(M, dtype=np.float64)
+        return points @ M[:3, :3].T + M[:3, 3]
 
 
     def _addUvMap(self):
         """Add UV maps from `_u0`, `_u1`... attributes."""
+        mdata = self.meshObj.data
+        nLoops = len(mdata.loops)
+        loopVtx = np.empty(nLoops, dtype=np.int64)
+        mdata.loops.foreach_get('vertex_index', loopVtx)
         idx = 0
         while True:
             attr = '_u%d' % idx
-            try: data = self.attrBuffers[attr]
-            except KeyError: break
-
-            vMax  = self.fvtx.attrsByName[attr].format.get('max', 1)
-            mdata = self.meshObj.data
+            data = self.attrBuffers.get(attr)
+            if data is None:
+                break
+            # values are already normalized; flip V (DirectX -> OpenGL)
+            uv = np.asarray(data, dtype=np.float32)[loopVtx, :2].copy()
+            uv[:, 1] = 1.0 - uv[:, 1]
             uv_layer = mdata.uv_layers.new(name=attr)
-            for i, poly in enumerate(mdata.polygons):
-                for j, loopIdx in enumerate(poly.loop_indices):
-                    loop = mdata.loops[loopIdx]
-                    uvloop = uv_layer.data[loopIdx]
-                    x, y = data[loop.vertex_index][:2]
-                    y = 1-y
-                    if isinstance(x, int):
-                        uvloop.uv.x, uvloop.uv.y = x/vMax, y/vMax
-                    else:
-                        uvloop.uv.x, uvloop.uv.y = x, y
+            uv_layer.data.foreach_set('uv', uv.ravel())
             idx += 1
 
 
@@ -287,24 +280,35 @@ class LodImporter:
                 groups[bone.smooth_mtx_idx] = grp
                 groups[bone.rigid_mtx_idx] = grp
             
-            if self.fshp.header['vtx_skin_cnt'] == 1:
+            skin = self.fshp.header['vtx_skin_cnt']
+            if skin == 1:
                 # i0 specifies the bone rigid matrix group.
-                for i in range(0, len(i0)):
-                    idx = i0[i][0]
-                    groups[idx].add([i], 1, 'REPLACE')
+                for i, idx in enumerate(i0[:, 0].tolist()):
+                    groups[idx].add([i], 1.0, 'REPLACE')
             else:
-                # i0 specifies the bone smooth matrix group.
-                # Look for a bone with the same group.
-                for i in range(0, len(w0)):
-                    wgt = w0[i][:self.fshp.header['vtx_skin_cnt']] # how much this bone affects this vertex
-                    idx = i0[i] # which bone index group
-                    for j, w in enumerate(wgt):
-                        if w > 0:
-                            try:
-                                groups[idx[j]].add([i], w/255.0, 'REPLACE')
-                            except (KeyError, IndexError):
-                                log.warning("Bone group %d doesn't exist (referenced by weight of vtx %d, value %d)",
-                                    idx[j], i, w)
+                # i0/i1 give up to 8 smooth matrix indices and w0/w1 how
+                # much each one weighs (already normalized to 0..1).
+                idxs = np.concatenate([a for a in (i0, self.attrBuffers.get('_i1')) if a is not None], axis=1)[:, :skin]
+                wgts = np.concatenate([a for a in (w0, self.attrBuffers.get('_w1')) if a is not None], axis=1)
+                if wgts.shape[1] < skin:
+                    # the last weight is implied when it isn't stored
+                    rest = np.clip(1.0 - wgts.sum(axis=1, keepdims=True), 0, 1)
+                    wgts = np.concatenate((wgts, rest), axis=1)
+                wgts = wgts[:, :skin]
+                missing = set()
+                for i, (vidx, vw) in enumerate(zip(idxs.tolist(), wgts.tolist())):
+                    for idx, w in zip(vidx, vw):
+                        if w <= 0:
+                            continue
+                        grp = groups.get(idx)
+                        if grp is None:
+                            missing.add(idx)
+                            continue
+                        # ADD: the same bone may appear twice for a vertex
+                        grp.add([i], w, 'ADD')
+                if missing:
+                    log.warning("%s: weights reference unknown bone matrices %s",
+                        self.lodName, sorted(missing))
         else: 
             # no i0 or w0, mesh is parented to the bone it's on
             idx = self.fshp.header['single_bind']
