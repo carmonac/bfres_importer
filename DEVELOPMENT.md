@@ -78,3 +78,23 @@ Other options:
 
 The exit code is non-zero when any model fails, so the harness can gate a
 commit.
+
+## Proving a refactor changes nothing
+
+`tools/snapshot.py` fingerprints every mesh (positions, faces, smooth flags,
+UVs, corner normals, vertex group weights) and every image (pixels) the
+importer produces. Take one snapshot before the change and compare after:
+
+```bash
+git stash   # or check out the base commit
+$BLENDER -b --factory-startup --python tools/snapshot.py -- \
+    ~/Documents/bfres_corpus/botw --out before.json
+git stash pop
+$BLENDER -b --factory-startup --python tools/snapshot.py -- \
+    ~/Documents/bfres_corpus/botw --out after.json --compare before.json
+```
+
+It prints `identical to before.json`, or each mesh/image that changed and
+which fields. Use it for performance work and clean-ups; for fixes, the
+listed differences should be exactly the ones you meant.
+

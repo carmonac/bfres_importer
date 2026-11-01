@@ -165,7 +165,6 @@ class FVTX(FresObject):
             self._readDicts()
             self._readAttrs()
             self._readBuffers()
-            self._readVtxs()
         except struct.error:
             log.exception("Error reading FVTX")
             raise
@@ -227,9 +226,23 @@ class FVTX(FresObject):
 
 
 
+    @property
+    def vtxs(self):
+        """Vertices as `Vertex` objects, decoded on first access.
+
+        The importer decodes attributes itself (LodImporter, numpy), so
+        this per-vertex parse is only done when something asks for it
+        (dumps, scripts); doing it eagerly cost ~8 s on a Divine Beast.
+        """
+        if self._vtxs is None:
+            self._readVtxs()
+        return self._vtxs
+
+    _vtxs = None
+
     def _readVtxs(self):
         """Read the vertices from the buffers."""
-        self.vtxs = []
+        self._vtxs = []
         for iVtx in range(self.header['num_vtxs']):
             vtx = Vertex()
             for attr in self.attrs: # get the data for each attribute
@@ -272,4 +285,4 @@ class FVTX(FresObject):
 
                 vtx.setAttr(attr, data)
 
-            self.vtxs.append(vtx)
+            self._vtxs.append(vtx)

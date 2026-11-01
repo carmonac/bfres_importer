@@ -29,17 +29,15 @@ class TextureImporter:
                 width=tex.width, height=tex.height)
             # image.use_alpha = True
 
-            offs   = 0
-            r,g,b,a = 0,0,0,0
-            ctype = [0, 255, r, g, b, a]
-            compSelect = tex.channel_types
-            
             pixels = tex.format_.decodePixels(tex.pixels)
 
             # flip image from dx to gl
             pixels = np.flipud(pixels.reshape((tex.height, tex.width, 4)))
 
-            image.pixels = np.ravel(pixels)
+            # foreach_set copies the whole buffer at once; assigning to
+            # image.pixels converts every float through Python.
+            image.pixels.foreach_set(
+                np.ascontiguousarray(pixels, dtype=np.float32).ravel())
 
             # save to file
             if self.operator.dump_textures:
