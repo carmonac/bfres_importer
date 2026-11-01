@@ -82,7 +82,7 @@ commit.
 ## Proving a refactor changes nothing
 
 `tools/snapshot.py` fingerprints every mesh (positions, faces, smooth flags,
-UVs, corner normals, vertex group weights) and every image (pixels) the
+UVs, corner normals, color / tangent attributes, vertex group weights) and every image (pixels) the
 importer produces. Take one snapshot before the change and compare after:
 
 ```bash

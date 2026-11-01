@@ -11,6 +11,9 @@ This addon is currently in heavy development and large portions of it do not wor
     - [X] BFRES 10 (Splatoon 3, Mario Wonder, TOTK)
 - Importing into Blender
     - [x] Models
+        - Custom split normals from the game (`_n0`); left out with "Smooth Faces" off
+        - Vertex colors `_c0`, `_c1`... as color attributes (float, per vertex, values as stored)
+        - Tangents / bitangents as `_t0` / `_b0` vector attributes, their sign in `_t0_w` / `_b0_w`
     - [x] Textures
         - Very slow, needs work on 
     - [ ] Materials
