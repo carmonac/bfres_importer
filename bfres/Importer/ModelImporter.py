@@ -8,8 +8,50 @@ from .SkeletonImporter import SkeletonImporter
 from .LodImporter      import LodImporter
 
 
+def hide_collection(context, coll):
+    """Exclude a collection from the view layer and from renders, so the
+    scene looks as if it wasn't there until the user enables it."""
+    coll.hide_render = True
+
+    def find(layer):
+        if layer.collection == coll:
+            return layer
+        for child in layer.children:
+            found = find(child)
+            if found is not None:
+                return found
+        return None
+
+    layer = find(context.view_layer.layer_collection)
+    if layer is not None:
+        layer.exclude = True
+
+
 class ModelImporter:
     """Mixin class for importing the geometric models."""
+
+    # Collection new objects are linked to; None is the scene collection.
+    collection = None
+
+    def targetCollection(self):
+        return self.collection or bpy.context.scene.collection
+
+    def lodCollection(self, idx):
+        """Collection for the objects of LOD `idx`: LOD 0 goes with the
+        rest of the model, each further LOD into a hidden child collection
+        `<model>.LOD<idx>`."""
+        base = self.targetCollection()
+        if idx == 0:
+            return base
+        cache = self.__dict__.setdefault('_lodCollections', {})
+        key = (self.fmdl.name, idx)
+        coll = cache.get(key)
+        if coll is None:
+            coll = bpy.data.collections.new("%s.LOD%d" % (self.fmdl.name, idx))
+            base.children.link(coll)
+            hide_collection(bpy.context, coll)
+            cache[key] = coll
+        return coll
 
     def _importModel(self, fmdl):
         """Import specified model."""

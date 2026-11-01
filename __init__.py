@@ -109,8 +109,15 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
         default=True)
 
     first_lod: BoolProperty(name="First LOD",
-        description="Only import the first, most detailed LOD.",
+        description="Only import the first, most detailed LOD. Otherwise "
+                    "the other LODs go into hidden collections <model>.LOD1, "
+                    "<model>.LOD2...",
         default=True)
+
+    import_far: BoolProperty(name="Import Far Model",
+        description="Also import the distant model (<model>_Far file next to "
+                    "this one) into a hidden collection <model>.Far",
+        default=False)
 
     connect_bones: BoolProperty(name="Auto Connect Bones",
         description="Attempt to connect bones together",
@@ -127,10 +134,15 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
     def draw(self, context):
         pass
 
+    def invoke(self, context, event):
+        # the add-on preferences give the default of dump_debug
+        from .bfres.Importer.Preferences import get_preferences
+        prefs = get_preferences(context)
+        if prefs is not None and not self.properties.is_property_set("dump_debug"):
+            self.dump_debug = prefs.debugDumpFiles
+        return ImportHelper.invoke(self, context, event)
+
     def execute(self, context):
-        #user_preferences = context.user_preferences
-        #addon_prefs = user_preferences.addons[self.bl_idname].preferences
-        #print("PREFS:", user_preferences, addon_prefs)
         keywords = self.as_keywords(ignore=("filter_glob", "directory", "ui_tab", "filepath", "files"))
 
         import os
@@ -161,7 +173,38 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
                 animImporter.animationsOnly = True
                 animImporter.targetArmature = importer.armature
                 animImporter.run(animpath, **keywords)
+
+        # the distant (low detail) model is kept in <model>_Far.sbfres
+        if self.import_far:
+            self._importFar(context, keywords)
         return result
+
+    def _importFar(self, context, keywords):
+        import os
+        from .bfres.Importer import Importer
+        from .bfres.Importer.ModelImporter import hide_collection
+        stem, ext = os.path.splitext(self.filepath)
+        if stem.endswith('.Tex'):
+            stem = stem[:-4]
+        if stem.endswith('_Far'):
+            return
+        farpath = stem + '_Far' + ext
+        if not os.path.exists(farpath):
+            log.info("No far model: %s", farpath)
+            return
+        coll = bpy.data.collections.new(os.path.basename(stem) + '.Far')
+        context.scene.collection.children.link(coll)
+        if self.import_tex_file:
+            texpath = stem + '_Far.Tex' + ext
+            if os.path.exists(texpath):
+                log.info("Importing linked file: %s", texpath)
+                Importer(self, context).run(texpath, **keywords)
+        log.info("Importing far model: %s", farpath)
+        farImporter = Importer(self, context)
+        farImporter.collection = coll
+        farImporter.run(farpath, **keywords)
+        # hide only now: the armature must be in the view layer to edit it
+        hide_collection(context, coll)
 
 class BFRES_PT_import_textures(bpy.types.Panel):
     bl_space_type = 'FILE_BROWSER'
@@ -209,6 +252,7 @@ class BFRES_PT_import_mesh(bpy.types.Panel):
 
         layout.prop(operator, "smooth_faces")
         layout.prop(operator, "first_lod")
+        layout.prop(operator, "import_far")
         layout.prop(operator, "connect_bones")
 
 class BFRES_PT_import_mat(bpy.types.Panel):
@@ -267,7 +311,10 @@ def menu_func_import(self, context):
 #    self.layout.operator(ExportBFRES.bl_idname, text="Nintendo Switch BFRES (.bfres)")
 
 
+from .bfres.Importer.Preferences import BfresPreferences
+
 classes = (
+    BfresPreferences,
     ImportBFRES,
     BFRES_PT_import_textures,
     BFRES_PT_import_mesh,
