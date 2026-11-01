@@ -494,6 +494,9 @@ class FMAT(FresObject):
             # works for both versions.
             assign['tex_attr_dict_offs'] = assign['tex_attr_dict']
             assign['shader_option_dict_offs'] = assign['shader_option_dict']
+            # 5.x has no index arrays: attributes follow dictionary order.
+            assign['tex_attr_indx'] = 0
+            assign['vtx_attr_indx'] = 0
 
         self.vtxAttrs = []
         for i in range(assign['num_vtx_attrs']):
