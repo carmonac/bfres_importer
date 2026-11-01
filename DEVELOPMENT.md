@@ -127,6 +127,35 @@ python3 tools/test_textures.py make /tmp/synth/synth
 $BLENDER -b --factory-startup --python tools/test_textures.py -- check /tmp/synth/synth.bntx
 ```
 
+### Texture layout: block heights, mips, layers, channel selectors
+
+`bfres/BNTX/pixelfmt/swizzle.py` follows the console driver's rules, as
+ported by Ryujinx / [tegra_swizzle](https://github.com/ScanMountGoat/tegra_swizzle):
+GOBs of 64 bytes x 8 rows, each level deswizzled with the BRTI block height
+(`textureLayout & 7`) halved while the level fits in half a block
+(`mip_block_height`), levels back to back, array layers / cube faces
+aligned to a block of GOBs (`surface_layout`). `BRTI` checks the computed
+offsets against the file's own (`mipOffsets`, `data_len`) and exposes every
+level and layer: `levelData(level, layer)`, `decodeLevel()`, `rgba()`.
+The importer only makes images of level 0, layer 0.
+
+BRTI channel selectors (`channel_types`, e.g. `RRRR` for most BC4) are
+applied by `rgba(selectors=True)`, or by default with
+`BFRES_CHANNEL_SELECTORS=on`; they are off by default because the
+material code expects the decoders' own output (`pixelfmt/channels.py`
+lists what BotW uses and what would change).
+
+```bash
+# every texture header of a RomFS: formats, sizes, block heights,
+# selectors, and a check of the computed layout against the file
+$BLENDER_PY tools/scan_textures.py romfs.img --out /tmp/tex_headers.json
+# decode every level of every texture, compare with the reduced level above
+$BLENDER_PY tools/test_textures.py levels ~/Documents/bfres_corpus/botw
+```
+
+(`$BLENDER_PY`: any Python with numpy, e.g. Blender's own
+`Contents/Resources/5.2/python/bin/python3.13`.)
+
 ## Proving a refactor changes nothing
 
 `tools/snapshot.py` fingerprints every mesh (positions, faces, smooth flags,
