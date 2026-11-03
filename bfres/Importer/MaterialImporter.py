@@ -29,6 +29,25 @@ class MaterialImporter:
             return False
 
 
+    def _terrain(self, fmat):
+        """Terrain texture arrays (TerrainTextures) when `fmat` samples
+        them (uking_texture_array_textureN), found once per import."""
+        if not any(str(v) in ('0', '1') for k, v in fmat.shaderOptions.items()
+                   if k.startswith('uking_texture_array_texture')):
+            return None
+        parent = self.parent
+        if '_terrainTextures' not in parent.__dict__:
+            from . import TerrainTextures
+            path = TerrainTextures.find_terrain_file(
+                getattr(parent, 'path', None), getattr(self.operator, 'terrain_tex_file', ''))
+            if path is None:
+                log.info("%s uses the terrain texture arrays (MaterialAlb/MaterialCmb), "
+                    "but no Terrain.Tex.sbfres was found (set Terrain Textures in the "
+                    "import options; it is in Pack/TitleBG.pack/Model/)", fmat.name)
+            parent._terrainTextures = TerrainTextures.get(path)
+        return parent._terrainTextures
+
+
     def importMaterial(self, fmat):
         """Import specified material."""
         mat = bpy.data.materials.new(name=fmat.name)
@@ -52,7 +71,8 @@ class MaterialImporter:
                     continue
                 textures.append((sampler, info['textureName'], image))
             UkingMaterial.UkingMaterialBuilder(fmat, mat, self.operator,
-                has_vertex_color=self._hasVertexColor(fmat)).build(textures)
+                has_vertex_color=self._hasVertexColor(fmat),
+                terrain=self._terrain(fmat)).build(textures)
             return mat
 
         mat_wrap = PrincipledBSDFWrapper(mat, is_readonly=False)

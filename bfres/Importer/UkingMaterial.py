@@ -143,17 +143,20 @@ def coords_for_samplers(fmat):
     for slot_idx, sampler in enumerate(slot_samplers(fmat)):
         if sampler is None or sampler in result:
             continue
-        tc = _int_option(fmat, 'uking_texture%d_texcoord' % slot_idx, 0)
-        if not 0 <= tc <= 4:
-            result[sampler] = ('_u0', None)   # procedural / indirect coordinates
-            continue
-        mapping = _int_option(fmat, 'uking_texcoord%d_mapping' % tc, 0)
-        srt = _int_option(fmat, 'uking_texcoord%d_srt' % tc, -1)
-        if 0 <= mapping <= 3:
-            result[sampler] = ('_u%d' % mapping, srt if srt >= 0 else None)
-        else:
-            result[sampler] = ('_u0', None)
+        result[sampler] = slot_coord(fmat, slot_idx)
     return result
+
+
+def slot_coord(fmat, slot_idx):
+    """(UV layer name, tex_srt index or None) of shader texture slot N."""
+    tc = _int_option(fmat, 'uking_texture%d_texcoord' % slot_idx, 0)
+    if not 0 <= tc <= 4:
+        return ('_u0', None)   # procedural / indirect coordinates
+    mapping = _int_option(fmat, 'uking_texcoord%d_mapping' % tc, 0)
+    srt = _int_option(fmat, 'uking_texcoord%d_srt' % tc, -1)
+    if 0 <= mapping <= 3:
+        return ('_u%d' % mapping, srt if srt >= 0 else None)
+    return ('_u0', None)
 
 
 def uv_layers_for_samplers(fmat):
@@ -179,11 +182,13 @@ def tex_srt_values(fmat, index):
 class UkingMaterialBuilder:
     """Builds the node tree of one uking_mat material."""
 
-    def __init__(self, fmat, mat, operator=None, has_vertex_color=False):
+    def __init__(self, fmat, mat, operator=None, has_vertex_color=False, terrain=None):
         self.fmat = fmat
         self.mat = mat
         self.operator = operator
         self.has_vertex_color = has_vertex_color
+        self.terrain = terrain  # TerrainTextures for tma/tmc array slots, or None
+        self._slot_coords = {}
         self.nodes = mat.node_tree.nodes
         self.links = mat.node_tree.links
         self._uv_nodes = {}
@@ -318,7 +323,11 @@ class UkingMaterialBuilder:
         if normal2:
             self._combined_normal(*normal2)
         else:
-            self._normal(by_role.get('normal'))
+            n0 = parse('uking_normal_color')
+            if self._is_array_slot(n0):
+                self._terrain_normal(n0)   # terrain MaterialCmb layer
+            else:
+                self._normal(by_role.get('normal'))
 
         spec = parse('uking_specmask_scaler', 'uking_specular_channel')
         if spec is not None:
@@ -362,18 +371,90 @@ class UkingMaterialBuilder:
             return None
         by_sampler = {s: (s, t, img) for s, t, img in textures}
         self._slots = [by_sampler.get(s) for s in slots]
+        self._bind_array_slots(slots)
         bound = [i for i, e in enumerate(self._slots) if e is not None]
         colors = [i for i in range(16) if param_floats(self.fmat, 'const_color%d' % i)]
         values = [i for i in range(16) if param_floats(self.fmat, 'const_value%d' % i)]
         return combiner.Combiner(self.fmat.shaderOptions, bound, self.has_vertex_color,
                                  colors, values)
 
+    def _bind_array_slots(self, slots):
+        """Bind the slots that sample a terrain texture array (see
+        TerrainTextures): slot N reads array uking_texture_array_textureN
+        (0 = array0, 1 = array1) at layer texture_array_indexN."""
+        if self.terrain is None:
+            return
+        for n in range(len(combiner.TEXTURE_SLOTS) - 2):
+            arr = _int_option(self.fmat, 'uking_texture_array_texture%d' % n, -1)
+            if arr not in (0, 1):
+                continue
+            sampler = slots[len(combiner.TEXTURE_SLOTS) - 2 + arr]
+            info = self.fmat.textureSamplers.get(sampler) if sampler else None
+            if not info:
+                continue
+            layer = int(round((param_floats(self.fmat, 'texture_array_index%d' % n) or [0.0])[0]))
+            image = self.terrain.layer_image(info['textureName'], layer)
+            if image is None:
+                continue
+            # one node per (array, layer): several slots may share an array
+            self._slots[n] = ('%s[%d]' % (sampler, layer), info['textureName'], image)
+            self._slot_coords[n] = slot_coord(self.fmat, n)
+
+    def _is_array_slot(self, expr):
+        return isinstance(expr, combiner.Tex) and expr.slot in self._slot_coords
+
     def slot_node(self, slot):
         sampler, texname, image = self._slots[slot]
         role = sampler_role(sampler, texname) or 'texture'
         y = 900 - 280 * slot
-        return self._image(image, role, sampler, self._coord_of.get(sampler, ('_u0', None)),
-                           -1150, y), image
+        coord = self._slot_coords.get(slot) or self._coord_of.get(sampler, ('_u0', None))
+        return self._image(image, role, sampler, coord, -1150, y), image
+
+    def _normal_color(self, expr):
+        """Color for a Normal Map node from a combiner expression. Terrain
+        MaterialCmb layers hold the normal in RG only (blue is the specular
+        mask); uking_enable_decode_normalmap rebuilds Z from them."""
+        color = self.nc.color(expr)
+        if not self._is_array_slot(expr):
+            return color
+        sep = self._node('ShaderNodeSeparateColor', -650, -500, 'decode normal')
+        self.links.new(color, sep.inputs['Color'])
+        xy = self._node('ShaderNodeCombineXYZ', -560, -500)
+        for i, ch in enumerate(('Red', 'Green')):
+            m = self._node('ShaderNodeMath', -600, -560 - 40 * i)
+            m.operation = 'MULTIPLY_ADD'      # 2c - 1
+            m.inputs[1].default_value = 2.0
+            m.inputs[2].default_value = -1.0
+            self.links.new(sep.outputs[ch], m.inputs[0])
+            self.links.new(m.outputs['Value'], xy.inputs[i])
+        dot = self._node('ShaderNodeVectorMath', -520, -500)
+        dot.operation = 'DOT_PRODUCT'
+        self.links.new(xy.outputs['Vector'], dot.inputs[0])
+        self.links.new(xy.outputs['Vector'], dot.inputs[1])
+        z = self._node('ShaderNodeMath', -480, -500, 'z = sqrt(1 - x2 - y2)')
+        z.operation = 'SUBTRACT'
+        z.inputs[0].default_value = 1.0
+        z.use_clamp = True
+        self.links.new(dot.outputs['Value'], z.inputs[1])
+        sq = self._node('ShaderNodeMath', -440, -500)
+        sq.operation = 'SQRT'
+        self.links.new(z.outputs['Value'], sq.inputs[0])
+        bz = self._node('ShaderNodeMath', -400, -500)
+        bz.operation = 'MULTIPLY_ADD'         # z * 0.5 + 0.5
+        bz.inputs[1].default_value = 0.5
+        bz.inputs[2].default_value = 0.5
+        self.links.new(sq.outputs['Value'], bz.inputs[0])
+        out = self._node('ShaderNodeCombineColor', -360, -500)
+        self.links.new(sep.outputs['Red'], out.inputs['Red'])
+        self.links.new(sep.outputs['Green'], out.inputs['Green'])
+        self.links.new(bz.outputs['Value'], out.inputs['Blue'])
+        return out.outputs['Color']
+
+    def _terrain_normal(self, expr):
+        nm = self._node('ShaderNodeNormalMap', -300, -350)
+        nm.uv_map = self._slot_coords[expr.slot][0]
+        self.links.new(self._normal_color(expr), nm.inputs['Color'])
+        self.links.new(nm.outputs['Normal'], self.bsdf.inputs['Normal'])
 
     def _ao_factor(self, ao_expr, ao_role):
         if ao_expr is not None:
@@ -413,10 +494,10 @@ class UkingMaterialBuilder:
         mix = self._node('ShaderNodeMix', -450, -350, 'normal blend')
         mix.data_type = 'RGBA'
         self.links.new(self.nc.scalar(ratio), mix.inputs['Factor'])
-        self.links.new(self.nc.color(n0), mix.inputs['A'])
-        self.links.new(self.nc.color(n1), mix.inputs['B'])
+        self.links.new(self._normal_color(n0), mix.inputs['A'])
+        self.links.new(self._normal_color(n1), mix.inputs['B'])
         nm = self._node('ShaderNodeNormalMap', -300, -350)
-        layers = [self._coord_of.get(self._slots[t][0], ('_u0', None))[0]
+        layers = [(self._slot_coords.get(t) or self._coord_of.get(self._slots[t][0], ('_u0', None)))[0]
                   for t in sorted(combiner.textures_used(n0))]
         nm.uv_map = layers[0] if layers else '_u0'
         self.links.new(mix.outputs['Result'], nm.inputs['Color'])

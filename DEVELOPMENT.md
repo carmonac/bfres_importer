@@ -49,6 +49,15 @@ strings in the string table; `tools/scan_strings.py <romfs>` finds them.
 Strings are decoded by `bfres/BinaryStruct/text.py` (UTF-8, then Shift-JIS,
 then UTF-8 with replacement characters and a warning).
 
+`tools/corpus/botw_terrain.txt` extracts `Model/Terrain.Tex.sbfres` out of
+`Pack/TitleBG.pack` (a list entry with `.pack/` in it names a file inside a
+SARC pack): the terrain texture arrays (`MaterialAlb`/`MaterialCmb`, 83
+layers) that field objects blending with the terrain sample through their
+`tma`/`tmc` samplers (`bfres/Importer/TerrainTextures.py`). The importer
+looks for it next to the model, in the parent folder and in `../Model/`,
+or takes the "Terrain Textures" option (`--opt "terrain_tex_file='...'"` in
+the harness); the decompressed copy is cached in the add-on's cache folder.
+
 Keep the corpus outside the repository.
 
 ## Headless import harness

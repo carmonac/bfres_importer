@@ -24,6 +24,7 @@ This addon is currently in heavy development and large portions of it do not wor
         - Basic PBR samplers (albedo, normal, roughness, etc) apply correctly
         - BotW (`uking_mat`): part of the color combiner is emulated (copy, multiply and mix stages; textures, vertex color, `const_color*`/`const_value*`): layer blends (rock/moss, wall A/B by vertex alpha), ambient occlusion from vertex color, specular/metal/alpha from the channel the shader reads, second normal map blend. Other combiner stages fall back to the texture roles
         - UV layer and texture SRT per sampler from the shader options
+        - Terrain-blended field objects (grass fields, cliffs, mounds, sand) get their terrain material layers (`MaterialAlb`/`MaterialCmb` arrays) from BotW's `Terrain.Tex.sbfres` (in `Pack/TitleBG.pack/Model/`), found next to the model or set in the "Terrain Textures" option
     - [x] Bones 
         - Bones import with proper parents, not connected tip to tail by default
         - "Auto Connect Bones" points each bone at its chain child (heads, skinning and animations stay exact)

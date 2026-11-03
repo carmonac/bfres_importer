@@ -95,6 +95,12 @@ class ImportBFRES(bpy.types.Operator, ImportHelper):
                 "the files instead of packing them")),
         default='PACK')
 
+    terrain_tex_file: StringProperty(name="Terrain Textures",
+        description="Breath of the Wild's Terrain.Tex.sbfres (in Pack/TitleBG.pack/Model/), "
+                    "for materials that blend with the terrain (MaterialAlb/MaterialCmb). "
+                    "Empty: look next to the imported file and in its parent folder",
+        subtype='FILE_PATH', default="")
+
     texture_dir: StringProperty(name="Texture Folder",
         description="Folder for the saved textures. Empty: <model>_textures "
                     "next to the imported file",
@@ -251,6 +257,7 @@ class BFRES_PT_import_textures(bpy.types.Panel):
         operator = sfile.active_operator
 
         layout.prop(operator, "import_tex_file")
+        layout.prop(operator, "terrain_tex_file")
         layout.prop(operator, "texture_storage")
         if operator.texture_storage == 'FILES':
             layout.prop(operator, "texture_dir")
