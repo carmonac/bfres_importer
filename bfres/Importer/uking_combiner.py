@@ -307,3 +307,34 @@ def evaluate(expr, textures, vertex_color, const_colors, const_values, builtins=
             return r
         raise TypeError(e)
     return ev(expr)
+
+
+class _Fill(dict):
+    """Any texture slot -> the same RGBA."""
+
+    def __init__(self, value):
+        super().__init__()
+        self.value = (value,) * 4
+
+    def __missing__(self, key):
+        return self.value
+
+
+def peak(expr, const_colors, const_values, texture_max=None):
+    """Brightest RGB component an expression reaches with every texture at
+    its brightest (texture_max: slot -> RGBA maxima, default 1) and vertex
+    color and engine values at 1 (and everything at 0): an estimate of how
+    far above 1 an HDR value (emission of the moon, glows) goes.
+    const_colors / const_values: index -> RGBA / float."""
+    best = 0.0
+    for fill in (1.0, 0.0):
+        tex = _Fill(fill)
+        if fill and texture_max:
+            tex.update({k: tuple(v) for k, v in texture_max.items()})
+        try:
+            v = evaluate(expr, tex, (fill,) * 4, const_colors, const_values,
+                         {code: fill for code in range(500, 520)})
+        except (KeyError, ValueError, ZeroDivisionError, OverflowError, TypeError):
+            continue
+        best = max(best, max(abs(x) for x in v[:3]))
+    return best
